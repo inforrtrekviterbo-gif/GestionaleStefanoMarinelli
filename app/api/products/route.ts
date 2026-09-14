@@ -105,12 +105,21 @@ export async function POST(request: Request) {
   try { payload = JSON.parse(payloadRaw) as Record<string, unknown>; }
   catch { return json({ error: "Dati articolo non validi." }, 400); }
 
-  const name = text(payload.name);
-  const brand = text(payload.brand);
-  const category = text(payload.category);
-  const price = Number(payload.price);
+  // Modalita' "aggiungi variante": se arriva un variantGroup esistente, nome,
+  // marca, categoria e prezzo si ereditano dal prodotto base (niente ridigitare).
+  const existingGroup = text(payload.variantGroup);
   const variants = parseVariants(payload.variants);
-  if (!name || !brand || !category || !Number.isFinite(price) || price <= 0) return json({ error: "Nome, marca, categoria e prezzo sono obbligatori." }, 400);
+  let name: string, brand: string, category: string, price: number, variantGroup: string, createCatalog: boolean;
+  if (existingGroup) {
+    const base = await database().prepare(`SELECT name, brand, category, base_price AS price FROM catalog_products WHERE id = ?`).bind(existingGroup).first<{ name: string; brand: string; category: string; price: number }>();
+    if (!base) return json({ error: "Prodotto base non trovato." }, 404);
+    name = base.name; brand = base.brand; category = base.category; price = base.price;
+    variantGroup = existingGroup; createCatalog = false;
+  } else {
+    name = text(payload.name); brand = text(payload.brand); category = text(payload.category); price = Number(payload.price);
+    if (!name || !brand || !category || !Number.isFinite(price) || price <= 0) return json({ error: "Nome, marca, categoria e prezzo sono obbligatori." }, 400);
+    variantGroup = crypto.randomUUID(); createCatalog = true;
+  }
   if (!variants.length || variants.length > 50) return json({ error: "Aggiungi da 1 a 50 varianti." }, 400);
   if (variants.some((variant) => !variant.sku || !variant.color || !variant.size || !variant.eans.length)) return json({ error: "Ogni variante richiede colore, taglia, SKU e almeno un EAN." }, 400);
 
@@ -135,16 +144,17 @@ export async function POST(request: Request) {
 
   const storage = await bucket();
   if (filesByColor.size && !storage) return json({ error: "Archivio immagini non disponibile." }, 503);
-  const variantGroup = crypto.randomUUID();
   const photoKeys = new Map<string, string>();
   const uploadedKeys: string[] = [];
   const createdIds: number[] = [];
   let catalogCreated = false;
 
   try {
-    await database().prepare(`INSERT INTO catalog_products (id, name, brand, category, base_price, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`)
-      .bind(variantGroup, name, brand, category, price, new Date().toISOString()).run();
-    catalogCreated = true;
+    if (createCatalog) {
+      await database().prepare(`INSERT INTO catalog_products (id, name, brand, category, base_price, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`)
+        .bind(variantGroup, name, brand, category, price, new Date().toISOString()).run();
+      catalogCreated = true;
+    }
     for (const [colorKey, file] of filesByColor) {
       const extension = allowedImageTypes.get(file.type) ?? "jpg";
       const key = `products/${variantGroup}/${slug(colorKey)}-${crypto.randomUUID()}.${extension}`;
