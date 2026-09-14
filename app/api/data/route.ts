@@ -1,4 +1,3 @@
-import { clearRealtimeSales, saveSaleToRealtimeDatabase, verifiedFirebaseIdentityFromRequest, type VerifiedFirebaseIdentity } from "../../../lib/firebase-server";
 import { currentUser, database, ean13, ensureDatabase, hashToken, idCode, isTestMode, json, type SessionUser, type Store } from "../../../lib/runtime-db";
 import { getBucket } from "../../../lib/storage";
 
@@ -149,27 +148,6 @@ async function requireUser(request: Request) {
   return { response: null, user };
 }
 
-function firebaseIdentityMatchesUser(identity: VerifiedFirebaseIdentity, user: SessionUser) {
-  return identity.profile.username === user.username && identity.profile.role === user.role && identity.profile.store === user.store;
-}
-
-async function syncPendingRealtimeSales(identity: VerifiedFirebaseIdentity, limit = 10) {
-  const rows = identity.profile.role === "admin"
-    ? await all<{ id: number; payload: string }>(`SELECT id, payload FROM realtime_sync_jobs WHERE status <> 'synced' ORDER BY created_at LIMIT ?`, limit)
-    : await all<{ id: number; payload: string }>(`SELECT id, payload FROM realtime_sync_jobs WHERE status <> 'synced' AND store = ? ORDER BY created_at LIMIT ?`, identity.profile.store, limit);
-  for (const row of rows) {
-    try {
-      const payload = JSON.parse(row.payload) as Parameters<typeof saveSaleToRealtimeDatabase>[1];
-      await saveSaleToRealtimeDatabase(identity, payload);
-      await database().prepare(`UPDATE realtime_sync_jobs SET status = 'synced', attempts = attempts + 1, last_error = NULL, updated_at = ? WHERE id = ?`)
-        .bind(new Date().toISOString(), row.id).run();
-    } catch (error) {
-      await database().prepare(`UPDATE realtime_sync_jobs SET status = 'pending', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE id = ?`)
-        .bind(error instanceof Error ? error.message.slice(0, 500) : "Errore Firebase", new Date().toISOString(), row.id).run();
-    }
-  }
-}
-
 async function productRows() {
   return all<ProductRow>(`SELECT p.id, p.sku, p.name, p.brand, p.category, p.color, p.size, p.price, p.variant_group AS variantGroup, p.photo_key AS photoKey,
     COALESCE(GROUP_CONCAT(DISTINCT pe.ean), '') AS eans,
@@ -218,8 +196,6 @@ export async function GET(request: Request) {
   await ensureDatabase();
   const auth = await requireUser(request);
   if (auth.response || !auth.user) return auth.response;
-  const firebaseIdentity = await verifiedFirebaseIdentityFromRequest(request);
-  if (firebaseIdentity && firebaseIdentityMatchesUser(firebaseIdentity, auth.user)) await syncPendingRealtimeSales(firebaseIdentity, 5);
   const url = new URL(request.url);
   const view = url.searchParams.get("view") ?? "bootstrap";
 
@@ -525,11 +501,7 @@ async function deleteTransfer(user: SessionUser, body: JsonMap) {
   return json({ ok: true });
 }
 
-async function createSale(request: Request, user: SessionUser, body: JsonMap) {
-  const firebaseIdentity = await verifiedFirebaseIdentityFromRequest(request);
-  if (!firebaseIdentity) return json({ error: "Sessione Firebase scaduta. Esci e accedi nuovamente." }, 401);
-  if (!firebaseIdentityMatchesUser(firebaseIdentity, user)) return json({ error: "Il profilo Firebase non coincide con la cassa aperta." }, 403);
-  await syncPendingRealtimeSales(firebaseIdentity, 5);
+async function createSale(user: SessionUser, body: JsonMap) {
   const store = validStore(body.store) ? body.store : user.store;
   if (!store) return json({ error: "Seleziona il negozio della vendita." }, 400);
   if (user.role !== "admin" && user.store !== store) return json({ error: "Questa cassa non può operare sull'altro negozio." }, 403);
@@ -779,48 +751,12 @@ async function createSale(request: Request, user: SessionUser, body: JsonMap) {
       payments: paymentLines,
     };
   }
-  const realtimePayload: Parameters<typeof saveSaleToRealtimeDatabase>[1] = {
-    id: Number(saleId),
-    receiptNo,
-    store,
-    type,
-    subtotal,
-    adjustment: Math.round((total - subtotal) * 100) / 100,
-    total,
-    cashAmount: cash,
-    cardAmount: card,
-    bankAmount: bank,
-    giftAmount,
-    customerId,
-    fiscalDocumentType,
-    createdAt,
-    lines: items.map((item) => ({
-      productId: item.productId,
-      description: item.description,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      discountPercent: item.discountPercent,
-      lineTotal: Math.round(item.quantity * item.unitPrice * (1 - item.discountPercent / 100) * 100) / 100,
-      itemType: item.itemType,
-    })),
-  };
-  const realtimeJob = await database().prepare(`INSERT OR REPLACE INTO realtime_sync_jobs (sale_id, store, payload, status, attempts, last_error, created_at, updated_at) VALUES (?, ?, ?, 'pending', 0, NULL, ?, ?)`)
-    .bind(saleId, store, JSON.stringify(realtimePayload), createdAt, createdAt).run();
-  let realtimeSynced = false;
-  let realtimeWarning: string | null = null;
-  try {
-    await saveSaleToRealtimeDatabase(firebaseIdentity, realtimePayload);
-    realtimeSynced = true;
-    await database().prepare(`UPDATE realtime_sync_jobs SET status = 'synced', attempts = attempts + 1, last_error = NULL, updated_at = ? WHERE sale_id = ?`)
-      .bind(new Date().toISOString(), saleId).run();
-  } catch (error) {
-    realtimeWarning = "Vendita registrata: sincronizzazione Firebase in attesa.";
-    await database().prepare(`UPDATE realtime_sync_jobs SET status = 'pending', attempts = attempts + 1, last_error = ?, updated_at = ? WHERE sale_id = ?`)
-      .bind(error instanceof Error ? error.message.slice(0, 500) : "Errore Firebase", new Date().toISOString(), saleId).run();
-  }
+  // La vendita e' gia' persistita su Postgres (saleId esiste): con database
+  // condiviso i due negozi la vedono subito, non serve mirror esterno. La stampa
+  // dello scontrino resta bloccata finche' la vendita non e' registrata: la coda
+  // fiscale viene creata solo qui, dopo l'inserimento della vendita.
   if (fiscalPayload) {
-    const jobStatus = !realtimeSynced ? "error" : fiscalDevice?.enabled && fiscalDevice.tokenHash ? "queued" : "awaiting_setup";
-    const deviceResponse = realtimeSynced ? null : "Stampa bloccata: sincronizzazione Firebase non ancora confermata.";
+    const jobStatus = fiscalDevice?.enabled && fiscalDevice.tokenHash ? "queued" : "awaiting_setup";
     const storedPayload = { ...fiscalPayload };
     if (jobStatus === "queued") {
       localFiscalTicket = randomLocalTicket();
@@ -828,14 +764,14 @@ async function createSale(request: Request, user: SessionUser, body: JsonMap) {
       storedPayload.localTicketExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     }
     const inserted = await database().prepare(`INSERT OR IGNORE INTO fiscal_jobs (sale_id, store, job_type, payload, status, attempts, device_response, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`)
-      .bind(saleId, store, type, JSON.stringify(storedPayload), jobStatus, deviceResponse, createdAt, createdAt).run();
+      .bind(saleId, store, type, JSON.stringify(storedPayload), jobStatus, null, createdAt, createdAt).run();
     const job = inserted.meta?.last_row_id
       ? { id: Number(inserted.meta.last_row_id), status: jobStatus }
       : await database().prepare(`SELECT id, status FROM fiscal_jobs WHERE sale_id = ?`).bind(saleId).first<{ id: number; status: string }>();
     fiscalJob = job ?? null;
     await database().prepare(`UPDATE sales SET fiscal_status = ? WHERE id = ?`).bind(jobStatus, saleId).run();
   }
-  return json({ ok: true, saleId, receiptNo, automaticFiscalDocument: bank > 0 ? fiscalDocumentType : null, invoiceDocument, fiscalJob, localFiscalTicket, localFiscalPayload: localFiscalTicket ? fiscalPayload : null, replacementGift, realtimeSynced, realtimeWarning, realtimeJobId: realtimeJob.meta?.last_row_id ?? null });
+  return json({ ok: true, saleId, receiptNo, automaticFiscalDocument: bank > 0 ? fiscalDocumentType : null, invoiceDocument, fiscalJob, localFiscalTicket, localFiscalPayload: localFiscalTicket ? fiscalPayload : null, replacementGift, persisted: true });
 }
 
 async function regenerateFiscalToken(user: SessionUser, body: JsonMap) {
@@ -863,9 +799,7 @@ async function setFiscalDeviceEnabled(user: SessionUser, body: JsonMap) {
   return json({ ok: true });
 }
 
-async function retryFiscalJob(request: Request, user: SessionUser, body: JsonMap) {
-  const firebaseIdentity = await verifiedFirebaseIdentityFromRequest(request);
-  if (!firebaseIdentity || !firebaseIdentityMatchesUser(firebaseIdentity, user)) return json({ error: "Sessione Firebase scaduta. Esci e accedi nuovamente." }, 401);
+async function retryFiscalJob(user: SessionUser, body: JsonMap) {
   const jobId = Math.round(numberValue(body.jobId));
   const job = await database().prepare(`SELECT id, store, sale_id AS saleId, status, payload, claimed_at AS claimedAt FROM fiscal_jobs WHERE id = ?`).bind(jobId).first<{ id: number; store: string; saleId: number; status: string; payload: string; claimedAt: string | null }>();
   if (!job) return json({ error: "Richiesta fiscale non trovata." }, 404);
@@ -874,29 +808,27 @@ async function retryFiscalJob(request: Request, user: SessionUser, body: JsonMap
   if (!["error", "awaiting_setup"].includes(job.status) && !staleProcessing) return json({ error: "Questa richiesta non può essere rimessa in coda. Attendi almeno due minuti se la stampa è rimasta bloccata." }, 409);
   const device = await database().prepare(`SELECT enabled, token_hash AS tokenHash FROM fiscal_devices WHERE store = ?`).bind(job.store).first<{ enabled: number; tokenHash: string | null }>();
   if (!device?.enabled || !device.tokenHash) return json({ error: "Il ponte Windows del negozio non è abilitato." }, 409);
-  const realtime = await database().prepare(`SELECT status FROM realtime_sync_jobs WHERE sale_id = ?`).bind(job.saleId).first<{ status: string }>();
-  if (realtime?.status !== "synced") return json({ error: "La vendita non è ancora confermata su Firebase: la stampa resta bloccata." }, 409);
   const localFiscalTicket = randomLocalTicket();
   const ticketHash = await hashToken(localFiscalTicket);
   const ticketExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const now = new Date().toISOString();
-  await database().prepare(`UPDATE fiscal_jobs SET status = 'queued', payload = json_set(payload, '$.localTicketHash', ?, '$.localTicketExpiresAt', ?), claimed_at = NULL, device_response = NULL, updated_at = ? WHERE id = ?`)
-    .bind(ticketHash, ticketExpiresAt, now, job.id).run();
+  const payloadObj = JSON.parse(job.payload) as JsonMap;
+  payloadObj.localTicketHash = ticketHash;
+  payloadObj.localTicketExpiresAt = ticketExpiresAt;
+  await database().prepare(`UPDATE fiscal_jobs SET status = 'queued', payload = ?, claimed_at = NULL, device_response = NULL, updated_at = ? WHERE id = ?`)
+    .bind(JSON.stringify(payloadObj), now, job.id).run();
   await database().prepare(`UPDATE sales SET fiscal_status = 'queued' WHERE id = ?`).bind(job.saleId).run();
-  const localFiscalPayload = JSON.parse(job.payload) as JsonMap;
+  const localFiscalPayload = { ...payloadObj };
   delete localFiscalPayload.localTicketHash;
   delete localFiscalPayload.localTicketExpiresAt;
   return json({ ok: true, localFiscalTicket, localFiscalPayload, store: job.store });
 }
 
-async function completeLocalFiscalJob(request: Request, user: SessionUser, body: JsonMap) {
-  const firebaseIdentity = await verifiedFirebaseIdentityFromRequest(request);
-  if (!firebaseIdentity || !firebaseIdentityMatchesUser(firebaseIdentity, user)) return json({ error: "Sessione Firebase scaduta. Esci e accedi nuovamente." }, 401);
+async function completeLocalFiscalJob(user: SessionUser, body: JsonMap) {
   const jobId = Math.round(numberValue(body.jobId));
-  const job = await database().prepare(`SELECT fj.id, fj.sale_id AS saleId, fj.store, fj.status, rsj.status AS realtimeStatus FROM fiscal_jobs fj LEFT JOIN realtime_sync_jobs rsj ON rsj.sale_id = fj.sale_id WHERE fj.id = ?`).bind(jobId).first<{ id: number; saleId: number; store: Store; status: string; realtimeStatus: string | null }>();
+  const job = await database().prepare(`SELECT fj.id, fj.sale_id AS saleId, fj.store, fj.status FROM fiscal_jobs fj WHERE fj.id = ?`).bind(jobId).first<{ id: number; saleId: number; store: Store; status: string }>();
   if (!job || (user.role !== "admin" && user.store !== job.store)) return json({ error: "Richiesta fiscale non disponibile per questa cassa." }, 404);
   if (job.store !== "Viterbo") return json({ error: "Conferma diretta disponibile solo per la cassa RCH di Viterbo." }, 400);
-  if (job.realtimeStatus !== "synced") return json({ error: "La vendita non è ancora confermata su Firebase." }, 409);
   if (job.status === "printed") return json({ ok: true, alreadyCompleted: true });
   if (!["queued", "processing"].includes(job.status)) return json({ error: "La richiesta fiscale non è pronta per la conferma." }, 409);
   const now = new Date().toISOString();
@@ -910,9 +842,7 @@ async function completeLocalFiscalJob(request: Request, user: SessionUser, body:
   return json({ ok: true });
 }
 
-async function failLocalFiscalJob(request: Request, user: SessionUser, body: JsonMap) {
-  const firebaseIdentity = await verifiedFirebaseIdentityFromRequest(request);
-  if (!firebaseIdentity || !firebaseIdentityMatchesUser(firebaseIdentity, user)) return json({ error: "Sessione Firebase scaduta. Esci e accedi nuovamente." }, 401);
+async function failLocalFiscalJob(user: SessionUser, body: JsonMap) {
   const jobId = Math.round(numberValue(body.jobId));
   const job = await database().prepare(`SELECT id, sale_id AS saleId, store, status FROM fiscal_jobs WHERE id = ?`).bind(jobId).first<{ id: number; saleId: number; store: Store; status: string }>();
   if (!job || (user.role !== "admin" && user.store !== job.store)) return json({ error: "Richiesta fiscale non disponibile per questa cassa." }, 404);
@@ -1020,14 +950,9 @@ async function createDocument(user: SessionUser, body: JsonMap) {
   return json({ ok: true, documentId, number, netTotal, taxTotal, total });
 }
 
-async function resetData(request: Request, user: SessionUser, body: JsonMap) {
+async function resetData(user: SessionUser, body: JsonMap) {
   if (user.role !== "admin") return json({ error: "Funzione riservata all'amministratore." }, 403);
   if (stringValue(body.confirmation) !== "AZZERA TUTTO") return json({ error: "Conferma non valida." }, 400);
-  const firebaseIdentity = await verifiedFirebaseIdentityFromRequest(request);
-  if (!firebaseIdentity || !firebaseIdentityMatchesUser(firebaseIdentity, user) || firebaseIdentity.profile.role !== "admin") {
-    return json({ error: "Sessione Firebase amministratore non valida. Esci e accedi nuovamente." }, 401);
-  }
-  await clearRealtimeSales(firebaseIdentity);
   const db = database();
   const photoRows = await all<{ photoKey: string }>(`SELECT DISTINCT photo_key AS photoKey FROM products WHERE photo_key IS NOT NULL AND photo_key <> ''`);
   const storage = getBucket();
@@ -1050,7 +975,7 @@ export async function POST(request: Request) {
     if (action === "createCustomer") return createCustomer(auth.user, body);
     if (action === "updateCustomer") return updateCustomer(auth.user, body);
     if (action === "deleteCustomer") return deleteCustomer(auth.user, body);
-    if (action === "createSale") return createSale(request, auth.user, body);
+    if (action === "createSale") return createSale(auth.user, body);
     if (action === "createTransfer") return createTransfer(auth.user, body);
     if (action === "updateTransfer") return updateTransfer(auth.user, body);
     if (action === "deleteTransfer") return deleteTransfer(auth.user, body);
@@ -1065,10 +990,10 @@ export async function POST(request: Request) {
     if (action === "createDocument") return createDocument(auth.user, body);
     if (action === "regenerateFiscalToken") return regenerateFiscalToken(auth.user, body);
     if (action === "setFiscalDeviceEnabled") return setFiscalDeviceEnabled(auth.user, body);
-    if (action === "retryFiscalJob") return retryFiscalJob(request, auth.user, body);
-    if (action === "completeLocalFiscalJob") return completeLocalFiscalJob(request, auth.user, body);
-    if (action === "failLocalFiscalJob") return failLocalFiscalJob(request, auth.user, body);
-    if (action === "resetData") return resetData(request, auth.user, body);
+    if (action === "retryFiscalJob") return retryFiscalJob(auth.user, body);
+    if (action === "completeLocalFiscalJob") return completeLocalFiscalJob(auth.user, body);
+    if (action === "failLocalFiscalJob") return failLocalFiscalJob(auth.user, body);
+    if (action === "resetData") return resetData(auth.user, body);
     return json({ error: "Operazione non disponibile." }, 404);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Errore inatteso";

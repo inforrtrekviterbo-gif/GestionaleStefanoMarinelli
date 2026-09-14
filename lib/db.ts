@@ -45,6 +45,13 @@ export function translateSql(input: string): { text: string; conflictInsert: boo
   let text = input;
   let conflictInsert = false;
 
+  // 0) GROUP_CONCAT (SQLite) -> string_agg (Postgres)
+  text = text.replace(
+    /GROUP_CONCAT\(\s*(DISTINCT\s+)?([^,()]+?)(?:\s*,\s*([^()]+?))?\s*\)/gi,
+    (_whole, distinct: string | undefined, expr: string, sep: string | undefined) =>
+      `string_agg(${distinct ? "DISTINCT " : ""}${expr.trim()}, ${sep ? sep.trim() : "','"})`,
+  );
+
   // 1) alias camelCase -> quotati (salta i cast ALLCAPS come `AS INTEGER`)
   text = text.replace(/\bAS\s+([A-Za-z_][A-Za-z0-9_]*)/g, (whole, alias: string) => {
     const hasUpper = /[A-Z]/.test(alias);

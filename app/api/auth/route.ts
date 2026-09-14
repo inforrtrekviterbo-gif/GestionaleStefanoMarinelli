@@ -1,11 +1,11 @@
-import { firebaseProfileFromEmail } from "../../../lib/firebase-config";
-import { verifyFirebaseIdToken } from "../../../lib/firebase-server";
 import { createSession, currentUser, database, ensureDatabase, json, removeSession, type SessionUser } from "../../../lib/runtime-db";
+import { verifySupabaseToken } from "../../../lib/supabase-server";
+import { profileFromEmail } from "../../../lib/user-profiles";
 
-type LoginBody = { action?: string; idToken?: string };
+type LoginBody = { action?: string; accessToken?: string };
 
 async function applicationUserForEmail(email: string) {
-  const profile = firebaseProfileFromEmail(email);
+  const profile = profileFromEmail(email);
   if (!profile) return null;
   let user = await database().prepare(`SELECT id, username, display_name AS displayName, role, store, must_change_password AS mustChangePassword FROM users WHERE username = ?`)
     .bind(profile.username).first<SessionUser>();
@@ -29,12 +29,12 @@ export async function POST(request: Request) {
     await removeSession(request);
     return json({ ok: true }, 200, { "Set-Cookie": "gestionale_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0" });
   }
-  if (body.action !== "firebase-login" || !body.idToken) return json({ error: "Accesso Firebase richiesto." }, 400);
+  if (body.action !== "supabase-login" || !body.accessToken) return json({ error: "Accesso Supabase richiesto." }, 400);
 
-  const identity = await verifyFirebaseIdToken(body.idToken);
-  if (!identity) return json({ error: "Credenziali Firebase non valide o profilo non autorizzato." }, 401);
+  const identity = await verifySupabaseToken(body.accessToken);
+  if (!identity) return json({ error: "Credenziali Supabase non valide o scadute." }, 401);
   const user = await applicationUserForEmail(identity.email);
-  if (!user) return json({ error: "Profilo gestionale non autorizzato." }, 403);
+  if (!user) return json({ error: "Profilo gestionale non autorizzato per questa email." }, 403);
 
   const session = await createSession(user.id, 55 * 60);
   return json({ user }, 200, { "Set-Cookie": session.cookie });

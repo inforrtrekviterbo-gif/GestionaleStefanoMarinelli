@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
-import { firebaseAuthenticatedFetch } from "../lib/firebase-client";
 
 type Store = "Viterbo" | "Gran Sasso";
 type User = { role: "admin" | "viterbo" | "gran_sasso"; store: Store | null };
@@ -217,7 +216,7 @@ async function readJson(response: Response) {
 }
 
 async function post(action: string, values: Record<string, unknown> = {}) {
-  return readJson(await firebaseAuthenticatedFetch("/api/data", {
+  return readJson(await fetch("/api/data", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...values }),
@@ -579,8 +578,7 @@ export default function CashRegister({ data, reload }: { data: CashData; reload:
       }
       setLastSale({ id: result.saleId, receiptNo: result.receiptNo, automaticFiscalDocument: result.automaticFiscalDocument ?? null, invoiceDocument: result.invoiceDocument ?? null, fiscalJob: result.fiscalJob ?? null, replacementGift: result.replacementGift ?? null });
       setCart([]); setCartDiscount(""); setTotalOverride(""); setCashAmount(""); setCardAmount(""); setGiftAmount(""); setGiftCode(""); setCustomer(null); setCustomerQuery(""); setPayment("cash"); setFiscalDocumentType("receipt");
-      const realtimeMessage = result.realtimeSynced ? "Vendita sincronizzata in tempo reale." : result.realtimeWarning ?? "Sincronizzazione Firebase in attesa.";
-      setNotice(hasReturn ? `Cambio ${result.receiptNo} registrato. ${result.replacementGift ? `Buono precedente stornato: nuovo buono da ${money(result.replacementGift.value)} intestato a ${result.replacementGift.beneficiary}.` : total > 0 ? `Differenza incassata: ${money(total)}.` : total < 0 ? `Rimborso registrato: ${money(Math.abs(total))}.` : "Cambio alla pari."} ${fiscalMessage} ${realtimeMessage}` : payment === "bank" ? `Vendita ${result.receiptNo} registrata con bonifico. ${result.invoiceDocument ? `Fattura ${result.invoiceDocument.number} generata automaticamente.` : fiscalMessage} ${realtimeMessage}` : `Vendita ${result.receiptNo} registrata. ${fiscalMessage} ${realtimeMessage}`);
+      setNotice(hasReturn ? `Cambio ${result.receiptNo} registrato. ${result.replacementGift ? `Buono precedente stornato: nuovo buono da ${money(result.replacementGift.value)} intestato a ${result.replacementGift.beneficiary}.` : total > 0 ? `Differenza incassata: ${money(total)}.` : total < 0 ? `Rimborso registrato: ${money(Math.abs(total))}.` : "Cambio alla pari."} ${fiscalMessage}` : payment === "bank" ? `Vendita ${result.receiptNo} registrata con bonifico. ${result.invoiceDocument ? `Fattura ${result.invoiceDocument.number} generata automaticamente.` : fiscalMessage}` : `Vendita ${result.receiptNo} registrata. ${fiscalMessage}`);
       if (fiscalError) setError(fiscalError);
       await reload();
     } catch (reason) {
