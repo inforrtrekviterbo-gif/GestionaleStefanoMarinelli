@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { getDb, isDevDb } from "./db";
 
 export type Role = "admin" | "viterbo" | "gran_sasso";
 export type Store = "Viterbo" | "Gran Sasso";
@@ -135,6 +135,44 @@ async function seedProducts() {
   }
 }
 
+// Catalogo demo ricco, solo in sviluppo (pglite): serve a vedere magazzino,
+// dashboard e "articoli da riordinare" pieni. Alcuni con giacenza bassa.
+async function seedDemoProducts() {
+  const db = database();
+  let ean = 8052000000000;
+  const nextEan = () => String(++ean);
+  // [name, category, brand, price, [ [color,size,vtQty,gsQty], ... ] ]
+  const catalog: [string, string, string, number, [string, string, number, number][]][] = [
+    ["Scarpa Trekking Alta", "Calzature", "Salewa", 129.9, [["Blu", "42", 6, 4], ["Blu", "43", 1, 0], ["Nero", "42", 0, 2], ["Nero", "44", 3, 3]]],
+    ["Scarpone Alpinismo", "Calzature", "La Sportiva", 249, [["Grigio", "43", 2, 1], ["Grigio", "44", 0, 0], ["Arancio", "42", 4, 2]]],
+    ["Sandalo Trekking", "Calzature", "Teva", 69.9, [["Marrone", "41", 5, 5], ["Marrone", "43", 1, 2]]],
+    ["Maglia Tecnica", "Abbigliamento", "Salewa", 39.9, [["Blu", "M", 8, 6], ["Verde", "L", 2, 1], ["Rosso", "S", 0, 4]]],
+    ["Pile Micropile", "Abbigliamento", "CMP", 49.9, [["Antracite", "M", 3, 2], ["Antracite", "L", 1, 0], ["Blu", "XL", 6, 5]]],
+    ["Giacca Antipioggia", "Abbigliamento", "The North Face", 159, [["Nero", "M", 2, 2], ["Nero", "L", 0, 1], ["Giallo", "M", 4, 0]]],
+    ["Pantalone Trekking", "Abbigliamento", "Millet", 79.9, [["Beige", "48", 5, 3], ["Beige", "50", 1, 1], ["Nero", "52", 2, 0]]],
+    ["Zaino Trail 30L", "Attrezzatura", "Deuter", 89, [["Rosso", "Unica", 4, 2], ["Blu", "Unica", 1, 0]]],
+    ["Zaino Alpino 45L", "Attrezzatura", "Osprey", 149, [["Verde", "Unica", 2, 1], ["Grigio", "Unica", 0, 0]]],
+    ["Bastoncini Trekking", "Attrezzatura", "Leki", 59.9, [["Nero", "Unica", 7, 4], ["Blu", "Unica", 2, 2]]],
+    ["Borraccia Termica", "Accessori", "Salewa", 24.9, [["Acciaio", "0.75L", 10, 8], ["Nero", "1L", 1, 0]]],
+    ["Calze Merino", "Accessori", "X-Socks", 18.9, [["Grigio", "39-41", 12, 9], ["Grigio", "42-44", 3, 1], ["Nero", "45-47", 0, 2]]],
+    ["Berretto Lana", "Accessori", "CMP", 19.9, [["Rosso", "Unica", 6, 5], ["Blu", "Unica", 1, 0]]],
+    ["Frontale LED", "Attrezzatura", "Petzl", 44.9, [["Nero", "Unica", 3, 2], ["Arancio", "Unica", 0, 1]]],
+    ["Guanti Impermeabili", "Accessori", "Reusch", 34.9, [["Nero", "M", 4, 3], ["Nero", "L", 1, 1], ["Grigio", "XL", 0, 0]]],
+  ];
+  for (const [name, category, brand, price, variants] of catalog) {
+    for (const [color, size, vt, gs] of variants) {
+      const sku = `${name.split(" ").map((w) => w.slice(0, 3)).join("").toUpperCase()}-${color.slice(0, 3).toUpperCase()}-${size}`.replace(/[^A-Z0-9-]/g, "");
+      await db.prepare(`INSERT OR IGNORE INTO products (sku, name, brand, category, color, size, price, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`)
+        .bind(sku, name, brand, category, color, size, price).run();
+      const product = await db.prepare(`SELECT id FROM products WHERE sku = ?`).bind(sku).first<{ id: number }>();
+      if (!product) continue;
+      await db.prepare(`INSERT OR IGNORE INTO product_eans (product_id, ean) VALUES (?, ?)`).bind(product.id, nextEan()).run();
+      await db.prepare(`INSERT OR IGNORE INTO inventory (product_id, store, quantity, reserved, reorder_level) VALUES (?, 'Viterbo', ?, 0, 2)`).bind(product.id, vt).run();
+      await db.prepare(`INSERT OR IGNORE INTO inventory (product_id, store, quantity, reserved, reorder_level) VALUES (?, 'Gran Sasso', ?, 0, 2)`).bind(product.id, gs).run();
+    }
+  }
+}
+
 export async function ensureDatabase() {
   const db = database();
   await db.batch(schemaStatements.map((statement) => db.prepare(statement)));
@@ -155,7 +193,7 @@ export async function ensureDatabase() {
   const seeded = await db.prepare(`SELECT value FROM app_settings WHERE key = 'initial_seed_completed'`).first<{ value: string }>();
   if (!seeded) {
     const products = await db.prepare(`SELECT COUNT(*) AS count FROM products`).first<{ count: number }>();
-    if (!products?.count) await seedProducts();
+    if (!products?.count) await (isDevDb() ? seedDemoProducts() : seedProducts());
     await db.prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('initial_seed_completed', '1')`).run();
   }
   await db.prepare(`UPDATE products SET variant_group = 'legacy-' || (
