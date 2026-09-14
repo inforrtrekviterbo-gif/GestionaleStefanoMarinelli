@@ -106,7 +106,16 @@ function Login({ onLogin }: { onLogin: (user: User) => void }) {
     }
     finally { setLoading(false); }
   }
-  return <main className="login-page"><section className="login-card"><div className="login-brand-lockup"><div className="brand-mark"><img src="/ms-logo.png" alt="" /></div><img className="login-wordmark" src="/gestionale-wordmark.png" alt="Gestionale Stefano Marinelli" /></div><form onSubmit={submit} className="stack login-form"><ClearableInput label="Nome utente" autoComplete="username" value={username} onChange={setUsername} placeholder="Nome utente" spellCheck={false} required /><ClearableInput label="Password" type="password" autoComplete="current-password" value={password} onChange={setPassword} placeholder="Password" required />{error && <div className="alert danger">{error}</div>}<button className="primary big" disabled={loading}>{loading ? "Accesso…" : "Accedi"}</button></form><PwaInstallButton /></section></main>;
+  async function devLogin() {
+    setLoading(true); setError("");
+    try {
+      const response = await readJson(await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "dev-login" }) }));
+      onLogin(response.user as User);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Accesso non riuscito."); }
+    finally { setLoading(false); }
+  }
+  const devEnabled = process.env.NEXT_PUBLIC_DEV_LOGIN === "1";
+  return <main className="login-page"><section className="login-card"><div className="login-brand-lockup"><div className="brand-mark"><img src="/ms-logo.png" alt="" /></div><img className="login-wordmark" src="/gestionale-wordmark.png" alt="Gestionale Stefano Marinelli" /></div><form onSubmit={submit} className="stack login-form"><ClearableInput label="Nome utente" autoComplete="username" value={username} onChange={setUsername} placeholder="Nome utente" spellCheck={false} required /><ClearableInput label="Password" type="password" autoComplete="current-password" value={password} onChange={setPassword} placeholder="Password" required />{error && <div className="alert danger">{error}</div>}<button className="primary big" disabled={loading}>{loading ? "Accesso…" : "Accedi"}</button></form>{devEnabled && <button type="button" className="secondary big" style={{ marginTop: 10 }} disabled={loading} onClick={() => void devLogin()}>Entra come admin (DEV)</button>}<PwaInstallButton /></section></main>;
 }
 
 function CustomerForm({ store, onSaved, onClose, customer = null }: { store: Store; onSaved: () => Promise<void>; onClose: () => void; customer?: Customer | null }) {
@@ -855,7 +864,7 @@ export default function Gestionale() {
   }, [user, data, page]);
   useEffect(() => { if (!scanNotice) return; const timer = window.setTimeout(() => setScanNotice(""), 3500); return () => window.clearTimeout(timer); }, [scanNotice]);
   const addToSale = useCallback((product: Product) => { setSaleQueue((queue) => [...queue, product.id]); setScanned(null); setScanNotice(`${product.name} ${product.color} ${product.size} aggiunto alla vendita. Vai in Cassa per incassare.`); }, []);
-  async function logout() { await Promise.allSettled([supabaseBrowser().auth.signOut(), fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) })]); setUser(null); setData(null); setSyncState("syncing"); }
+  async function logout() { try { await supabaseBrowser().auth.signOut(); } catch { /* Supabase non configurato (dev) */ } await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) }).catch(() => undefined); setUser(null); setData(null); setSyncState("syncing"); }
   if (loading) return <main className="loading-page"><div className="brand-mark"><img src="/ms-logo.png" alt="Logo Marinelli Stefano" /></div><p>Avvio del Gestionale…</p></main>;
   if (!user) return <Login onLogin={(nextUser) => { setUser(nextUser); setPage(nextUser.role === "admin" ? "dashboard" : "cash"); void reload(); }} />;
   if (!data) return <main className="loading-page"><p>{fatal || "Caricamento dati…"}</p><button className="primary" onClick={() => void reload()}>Riprova</button></main>;

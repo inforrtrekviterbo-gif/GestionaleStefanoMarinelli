@@ -18,23 +18,61 @@
  */
 import postgres from "postgres";
 
-type Sql = ReturnType<typeof postgres>;
+/**
+ * Due backend:
+ *  - PRODUZIONE / Supabase: se c'e' DATABASE_URL usa postgres.js.
+ *  - SVILUPPO senza configurazione: se DATABASE_URL manca usa pglite, un
+ *    Postgres in-process (WASM) persistito su file locale. Cosi' `npm run dev`
+ *    funziona subito, senza server ne' Supabase.
+ */
+type QueryResult = { rows: Record<string, unknown>[]; count: number };
+type Backend = {
+  query: (text: string, params: unknown[]) => Promise<QueryResult>;
+  begin: <T>(fn: (tx: Backend) => Promise<T>) => Promise<T>;
+};
 
-let sql: Sql | null = null;
+export function isDevDb(): boolean {
+  return !process.env.DATABASE_URL;
+}
 
-export function getSql(): Sql {
-  if (sql) return sql;
+let backendPromise: Promise<Backend> | null = null;
+
+async function createBackend(): Promise<Backend> {
   const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL non configurato (stringa Postgres Supabase).");
-  sql = postgres(url, {
-    // Supabase pooler (transaction mode) non supporta prepared statement lato server.
-    prepare: false,
-    // Le date nello schema sono TEXT ISO: nessuna conversione automatica.
-    types: {},
-    max: 5,
-    idle_timeout: 20,
+  if (url) {
+    const sql = postgres(url, { prepare: false, types: {}, max: 5, idle_timeout: 20 });
+    const wrap = (executor: ReturnType<typeof postgres>): Backend => ({
+      async query(text, params) {
+        const result = await executor.unsafe(text, params as never[]);
+        const rows = Array.from(result) as Record<string, unknown>[];
+        return { rows, count: (result as { count?: number }).count ?? rows.length };
+      },
+      begin(fn) {
+        return sql.begin((tx) => fn(wrap(tx as unknown as ReturnType<typeof postgres>))) as Promise<never>;
+      },
+    });
+    return wrap(sql);
+  }
+  // pglite (dev). Import dinamico: non entra nel bundle di produzione.
+  const { PGlite } = await import("@electric-sql/pglite");
+  const pg = new PGlite(process.env.PGLITE_PATH ?? ".pglite");
+  await pg.waitReady;
+  const wrap = (executor: { query: (t: string, p?: unknown[]) => Promise<{ rows: unknown[]; affectedRows?: number }> }): Backend => ({
+    async query(text, params) {
+      const result = await executor.query(text, params);
+      const rows = result.rows as Record<string, unknown>[];
+      return { rows, count: result.affectedRows ?? rows.length };
+    },
+    begin(fn) {
+      return pg.transaction(async (tx) => fn(wrap(tx))) as Promise<never>;
+    },
   });
-  return sql;
+  return wrap(pg);
+}
+
+function getBackend(): Promise<Backend> {
+  if (!backendPromise) backendPromise = createBackend();
+  return backendPromise;
 }
 
 // Tabelle senza colonna `id` autoincrementale: niente RETURNING id.
@@ -109,9 +147,7 @@ function insertTable(text: string): string | null {
   return match ? match[1].toLowerCase() : null;
 }
 
-type Executor = { unsafe: (query: string, params?: unknown[]) => Promise<unknown> };
-
-async function execute(executor: Executor, rawSql: string, values: unknown[]) {
+async function execute(backend: Backend, rawSql: string, values: unknown[]) {
   const { text: translated } = translateSql(rawSql);
   let text = numberPlaceholders(translated);
 
@@ -120,12 +156,10 @@ async function execute(executor: Executor, rawSql: string, values: unknown[]) {
     !!table && !NO_ID_TABLES.has(table) && !/RETURNING/i.test(text);
   if (wantsReturning) text = `${text} RETURNING id`;
 
-  const rows = (await executor.unsafe(text, values)) as Array<Record<string, unknown>> & {
-    count?: number;
-  };
+  const { rows, count } = await backend.query(text, values);
   const lastRowId =
     wantsReturning && rows.length > 0 ? (rows[0].id as number | undefined) : undefined;
-  return { rows: Array.from(rows), count: rows.count ?? rows.length, lastRowId };
+  return { rows, count, lastRowId };
 }
 
 export type D1RunResult = { success: boolean; meta: { last_row_id?: number; changes: number } };
@@ -145,25 +179,25 @@ export type D1Database = {
   batch: (statements: D1Statement[]) => Promise<D1RunResult[]>;
 };
 
-function makeStatement(executor: Executor, rawSql: string, values: unknown[] = []): D1Statement {
+function makeStatement(rawSql: string, values: unknown[] = []): D1Statement {
   return {
     __sql: rawSql,
     __values: values,
     bind(...next: unknown[]) {
-      return makeStatement(executor, rawSql, next);
+      return makeStatement(rawSql, next);
     },
     async first<T = Record<string, unknown>>(columnName?: string) {
-      const { rows } = await execute(executor, rawSql, values);
+      const { rows } = await execute(await getBackend(), rawSql, values);
       const row = rows[0];
       if (!row) return null;
       return (columnName ? (row[columnName] as T) : (row as T)) ?? null;
     },
     async all<T = Record<string, unknown>>() {
-      const { rows } = await execute(executor, rawSql, values);
+      const { rows } = await execute(await getBackend(), rawSql, values);
       return { results: rows as T[] };
     },
     async run() {
-      const { count, lastRowId } = await execute(executor, rawSql, values);
+      const { count, lastRowId } = await execute(await getBackend(), rawSql, values);
       return { success: true, meta: { last_row_id: lastRowId, changes: count } };
     },
   };
@@ -171,27 +205,23 @@ function makeStatement(executor: Executor, rawSql: string, values: unknown[] = [
 
 let cachedDb: D1Database | null = null;
 
-/** Oggetto D1-compatibile appoggiato a Postgres. Singleton di modulo. */
+/** Oggetto D1-compatibile appoggiato al backend attivo (Postgres o pglite). */
 export function getDb(): D1Database {
   if (cachedDb) return cachedDb;
-  const base = getSql();
   cachedDb = {
     prepare(rawSql: string) {
-      return makeStatement(base as unknown as Executor, rawSql);
+      return makeStatement(rawSql);
     },
     async batch(statements: D1Statement[]) {
-      return base.begin(async (tx) => {
+      const backend = await getBackend();
+      return backend.begin(async (tx) => {
         const results: D1RunResult[] = [];
         for (const statement of statements) {
-          const { count, lastRowId } = await execute(
-            tx as unknown as Executor,
-            statement.__sql,
-            statement.__values,
-          );
+          const { count, lastRowId } = await execute(tx, statement.__sql, statement.__values);
           results.push({ success: true, meta: { last_row_id: lastRowId, changes: count } });
         }
         return results;
-      }) as Promise<D1RunResult[]>;
+      });
     },
   };
   return cachedDb;

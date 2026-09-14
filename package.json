@@ -12,6 +12,7 @@
     "lint": "eslint . --ignore-pattern .next"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@supabase/supabase-js": "^2.45.4",
     "next": "16.2.6",
     "postgres": "^3.4.5",

@@ -1,4 +1,5 @@
 import { createSession, currentUser, database, ensureDatabase, json, removeSession, type SessionUser } from "../../../lib/runtime-db";
+import { isDevDb } from "../../../lib/db";
 import { verifySupabaseToken } from "../../../lib/supabase-server";
 import { profileFromEmail } from "../../../lib/user-profiles";
 
@@ -28,6 +29,13 @@ export async function POST(request: Request) {
   if (body.action === "logout") {
     await removeSession(request);
     return json({ ok: true }, 200, { "Set-Cookie": "gestionale_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0" });
+  }
+  if (body.action === "dev-login") {
+    if (process.env.DEV_LOGIN !== "1" && !isDevDb()) return json({ error: "Accesso di sviluppo non abilitato." }, 403);
+    const user = await applicationUserForEmail("admin@gestionale.local");
+    if (!user) return json({ error: "Profilo admin non disponibile." }, 500);
+    const session = await createSession(user.id, 8 * 60 * 60);
+    return json({ user }, 200, { "Set-Cookie": session.cookie });
   }
   if (body.action !== "supabase-login" || !body.accessToken) return json({ error: "Accesso Supabase richiesto." }, 400);
 
