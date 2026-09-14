@@ -205,7 +205,7 @@ export async function GET(request: Request) {
     const transferId = Math.round(numberValue(url.searchParams.get("id")));
     const transfer = await database().prepare(`SELECT id, code, from_store AS fromStore, to_store AS toStore, sender, receiver, carrier, transport_reason AS transportReason, created_at AS createdAt FROM transfers WHERE id = ?`).bind(transferId).first();
     if (!transfer) return json({ error: "Trasferimento non trovato." }, 404);
-    const items = await all(`SELECT ti.product_id AS productId, ti.quantity, p.name, p.brand, p.color, p.size FROM transfer_items ti JOIN products p ON p.id = ti.product_id WHERE ti.transfer_id = ? ORDER BY ti.id`, transferId);
+    const items = await all(`SELECT ti.product_id AS productId, ti.quantity, COALESCE(p.name, ti.description) AS name, COALESCE(p.brand, '') AS brand, COALESCE(p.color, '') AS color, COALESCE(p.size, '') AS size FROM transfer_items ti LEFT JOIN products p ON p.id = ti.product_id WHERE ti.transfer_id = ? ORDER BY ti.id`, transferId);
     return json({ transfer, items });
   }
   if (view === "customer") {
@@ -387,11 +387,26 @@ async function setStock(user: SessionUser, body: JsonMap) {
 async function deleteProduct(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const productId = Math.round(numberValue(body.id));
-  const product = await database().prepare(`SELECT variant_group AS variantGroup FROM products WHERE id = ? AND active = 1`).bind(productId).first<{ variantGroup: string | null }>();
+  const product = await database().prepare(`SELECT variant_group AS variantGroup FROM products WHERE id = ?`).bind(productId).first<{ variantGroup: string | null }>();
   if (!product) return json({ error: "Prodotto non trovato." }, 404);
-  await database().prepare(`UPDATE products SET active = 0 WHERE id = ?`).bind(productId).run();
-  const remaining = product.variantGroup ? await database().prepare(`SELECT id FROM products WHERE variant_group = ? AND active = 1 LIMIT 1`).bind(product.variantGroup).first() : null;
-  if (!remaining && product.variantGroup) await database().prepare(`UPDATE catalog_products SET active = 0 WHERE id = ?`).bind(product.variantGroup).run();
+  // Blocca se ci sono pezzi impegnati (prenotazioni/acconti aperti).
+  const reserved = await database().prepare(`SELECT COALESCE(SUM(reserved), 0) AS reserved FROM inventory WHERE product_id = ?`).bind(productId).first<{ reserved: number }>();
+  if (Number(reserved?.reserved ?? 0) > 0) return json({ error: "Impossibile eliminare: il prodotto ha pezzi prenotati o in acconto. Chiudi prima le prenotazioni collegate." }, 409);
+  const db = database();
+  // Cancellazione reale: lo storico (vendite, prenotazioni, documenti, DDT)
+  // conserva la descrizione e perde solo il riferimento al prodotto.
+  await db.batch([
+    db.prepare(`UPDATE sale_items SET product_id = NULL WHERE product_id = ?`).bind(productId),
+    db.prepare(`UPDATE reservation_items SET product_id = NULL WHERE product_id = ?`).bind(productId),
+    db.prepare(`UPDATE reservations SET product_id = NULL WHERE product_id = ?`).bind(productId),
+    db.prepare(`UPDATE transfer_items SET product_id = NULL WHERE product_id = ?`).bind(productId),
+    db.prepare(`UPDATE business_document_items SET product_id = NULL WHERE product_id = ?`).bind(productId),
+    db.prepare(`DELETE FROM product_eans WHERE product_id = ?`).bind(productId),
+    db.prepare(`DELETE FROM inventory WHERE product_id = ?`).bind(productId),
+    db.prepare(`DELETE FROM products WHERE id = ?`).bind(productId),
+  ]);
+  const remaining = product.variantGroup ? await database().prepare(`SELECT id FROM products WHERE variant_group = ? LIMIT 1`).bind(product.variantGroup).first() : null;
+  if (!remaining && product.variantGroup) await database().prepare(`DELETE FROM catalog_products WHERE id = ?`).bind(product.variantGroup).run();
   return json({ ok: true });
 }
 
@@ -893,7 +908,7 @@ async function createTransfer(user: SessionUser, body: JsonMap) {
   const transferId = transfer.meta?.last_row_id;
   if (!transferId) return json({ error: "Trasferimento non registrato." }, 500);
   for (const item of items) {
-    await database().prepare(`INSERT INTO transfer_items (transfer_id, product_id, quantity) VALUES (?, ?, ?)`).bind(transferId, item.productId, item.quantity).run();
+    await database().prepare(`INSERT INTO transfer_items (transfer_id, product_id, description, quantity) VALUES (?, ?, ?, ?)`).bind(transferId, item.productId, item.description, item.quantity).run();
     await database().prepare(`UPDATE inventory SET quantity = quantity - ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, fromStore).run();
     await database().prepare(`UPDATE inventory SET quantity = quantity + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, toStore).run();
   }
@@ -970,7 +985,7 @@ async function resetData(user: SessionUser, body: JsonMap) {
   const photoRows = await all<{ photoKey: string }>(`SELECT DISTINCT photo_key AS photoKey FROM products WHERE photo_key IS NOT NULL AND photo_key <> ''`);
   const storage = getBucket();
   if (storage && photoRows.length) await storage.delete(photoRows.map((row) => row.photoKey));
-  for (const table of ["business_document_items", "business_documents", "transfer_items", "transfers", "reservation_items", "reservations", "gift_cards", "fiscal_jobs", "realtime_sync_jobs", "sale_items", "sales", "customers", "inventory", "product_eans", "products", "catalog_products"]) {
+  for (const table of ["business_document_items", "business_documents", "transfer_items", "transfers", "reservation_items", "reservations", "gift_cards", "fiscal_jobs", "sale_items", "sales", "customers", "inventory", "product_eans", "products", "catalog_products"]) {
     await db.prepare(`DELETE FROM ${table}`).run();
   }
   await db.prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('initial_seed_completed', '1')`).run();
