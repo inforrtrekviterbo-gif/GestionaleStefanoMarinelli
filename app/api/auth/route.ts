@@ -1,4 +1,4 @@
-import { createSession, currentUser, database, ensureDatabase, json, removeSession, type SessionUser } from "../../../lib/runtime-db";
+import { cookieSecure, createSession, currentUser, database, ensureDatabase, json, removeSession, type SessionUser } from "../../../lib/runtime-db";
 import { isDevDb } from "../../../lib/db";
 import { verifySupabaseToken } from "../../../lib/supabase-server";
 import { profileFromEmail } from "../../../lib/user-profiles";
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as LoginBody;
   if (body.action === "logout") {
     await removeSession(request);
-    return json({ ok: true }, 200, { "Set-Cookie": "gestionale_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0" });
+    return json({ ok: true }, 200, { "Set-Cookie": `gestionale_session=; Path=/; HttpOnly${cookieSecure()}; SameSite=Strict; Max-Age=0` });
   }
   if (body.action === "dev-login") {
     if (process.env.DEV_LOGIN !== "1" && !isDevDb()) return json({ error: "Accesso di sviluppo non abilitato." }, 403);

@@ -208,8 +208,14 @@ export async function createSession(userId: number, maxAgeSeconds = 55 * 60) {
     .bind(tokenHash, userId, expires.toISOString(), now.toISOString()).run();
   return {
     token,
-    cookie: `gestionale_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAgeSeconds}`,
+    cookie: `gestionale_session=${encodeURIComponent(token)}; Path=/; HttpOnly${cookieSecure()}; SameSite=Strict; Max-Age=${maxAgeSeconds}`,
   };
+}
+
+// `Secure` solo in produzione: su http://localhost i cookie Secure vengono
+// scartati da alcuni browser, impedendo il login in sviluppo.
+export function cookieSecure() {
+  return process.env.DATABASE_URL ? "; Secure" : "";
 }
 
 export async function removeSession(request: Request) {
