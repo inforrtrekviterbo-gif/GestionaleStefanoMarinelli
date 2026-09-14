@@ -766,8 +766,15 @@ const adminMenuGroups: { label: string; items: readonly (readonly [string, strin
 ];
 const cashierMenu = [["cash", "point_of_sale", "Cassa"], ["customers", "group", "Clienti"], ["inventory", "inventory_2", "Ricerca prodotti"], ["load", "add_box", "Carico prodotti"], ["register", "list_alt", "Vendite effettuate"], ["transfers", "swap_horiz", "Trasferimenti"], ["reservations", "event_note", "Acconti e ritiri"]] as const;
 
+function ScanInfo({ data, product, onAdd }: { data: Bootstrap; product: Product; onAdd: (product: Product) => void }) {
+  const group = data.products.filter((item) => (item.variantGroup || `single-${item.id}`) === (product.variantGroup || `single-${product.id}`));
+  const availability = (item: Product) => ({ vt: item.viterboQty - item.viterboReserved, gs: item.granSassoQty - item.granSassoReserved });
+  return <div className="scan-info">{product.photoKey && <img className="product-detail-photo" src={`/api/products?key=${encodeURIComponent(product.photoKey)}`} alt={product.name} />}<div className="scan-info-head"><p className="eyebrow">{product.category}</p><h2 className="product-detail-name">{product.brand} · {product.name}</h2><strong className="scan-info-price">{money(product.price)}</strong></div><div className="table-wrap"><table><thead><tr><th>Variante</th><th>Disponibile</th><th></th></tr></thead><tbody>{group.map((item) => { const avail = availability(item); return <tr key={item.id} className={item.id === product.id ? "scan-info-match" : ""}><td><strong>{item.color} · {item.size}</strong><small>{item.sku}</small></td><td>VT {avail.vt} · GS {avail.gs}</td><td><button className="secondary small" disabled={avail.vt <= 0 && avail.gs <= 0} onClick={() => onAdd(item)}>Aggiungi alla vendita</button></td></tr>; })}</tbody></table></div></div>;
+}
+
 export default function Gestionale() {
   const [user, setUser] = useState<User | null>(null); const [data, setData] = useState<Bootstrap | null>(null); const [loading, setLoading] = useState(true); const [page, setPage] = useState("dashboard"); const [menuOpen, setMenuOpen] = useState(false); const [fatal, setFatal] = useState(""); const [syncState, setSyncState] = useState<"online" | "syncing" | "offline">("syncing");
+  const [scanned, setScanned] = useState<Product | null>(null); const [saleQueue, setSaleQueue] = useState<number[]>([]); const [scanNotice, setScanNotice] = useState("");
   const refreshInFlight = useRef(false);
   const reload = useCallback(async (background = false) => {
     if (refreshInFlight.current) return;
@@ -822,13 +829,39 @@ export default function Gestionale() {
       document.removeEventListener("visibilitychange", refreshWhenActive);
     };
   }, [user?.id, reload]);
+  // Scansione globale: da qualsiasi schermata (tranne la Cassa, che ha il suo
+  // scanner) un lettore EAN apre la scheda prodotto con "Aggiungi alla vendita".
+  useEffect(() => {
+    if (!user || !data || page === "cash") return;
+    let buffer = ""; let last = 0;
+    const onKey = (event: KeyboardEvent) => {
+      const tag = (document.activeElement?.tagName ?? "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      const now = Date.now();
+      if (now - last > 100) buffer = "";
+      last = now;
+      if (event.key === "Enter") {
+        if (buffer.length >= 6) {
+          const code = buffer; buffer = "";
+          const found = data.products.find((product) => product.eans.split(",").map((value) => value.trim()).includes(code));
+          if (found) { setScanned(found); setScanNotice(""); } else setScanNotice(`EAN ${code} non riconosciuto.`);
+        }
+        return;
+      }
+      if (/^[0-9]$/.test(event.key)) buffer += event.key;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [user, data, page]);
+  useEffect(() => { if (!scanNotice) return; const timer = window.setTimeout(() => setScanNotice(""), 3500); return () => window.clearTimeout(timer); }, [scanNotice]);
+  const addToSale = useCallback((product: Product) => { setSaleQueue((queue) => [...queue, product.id]); setScanned(null); setScanNotice(`${product.name} ${product.color} ${product.size} aggiunto alla vendita. Vai in Cassa per incassare.`); }, []);
   async function logout() { await Promise.allSettled([supabaseBrowser().auth.signOut(), fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) })]); setUser(null); setData(null); setSyncState("syncing"); }
   if (loading) return <main className="loading-page"><div className="brand-mark"><img src="/ms-logo.png" alt="Logo Marinelli Stefano" /></div><p>Avvio del Gestionale…</p></main>;
   if (!user) return <Login onLogin={(nextUser) => { setUser(nextUser); setPage(nextUser.role === "admin" ? "dashboard" : "cash"); void reload(); }} />;
   if (!data) return <main className="loading-page"><p>{fatal || "Caricamento dati…"}</p><button className="primary" onClick={() => void reload()}>Riprova</button></main>;
   const navButton = ([id, icon, label]: readonly [string, string, string]) => <button key={id} className={page === id ? "active" : ""} onClick={() => { setPage(id); setMenuOpen(false); }}><MaterialIcon className="nav-icon">{icon}</MaterialIcon>{label}</button>;
-  const content: Record<string, ReactNode> = { dashboard: <Dashboard data={data} />, cash: <NewCashRegister data={data} reload={reload} />, customers: <Customers data={data} reload={reload} />, warehouse: <Warehouse data={data} reload={reload} />, inventory: <Inventory data={data} />, reorder: <ReorderList data={data} />, transfers: <Transfers data={data} reload={reload} />, load: <QuickLoad data={data} reload={reload} />, documents: <Documents data={data} reload={reload} />, register: <Register data={data} />, reports: <CashReports data={data} />, gifts: <GiftSummary data={data} reload={reload} />, reservations: <ReservationSummary data={data} reload={reload} />, analytics: <Analytics data={data} />, storico: <ActivityLog />, fiscal: <FiscalRegisters data={data} reload={reload} />, settings: <Settings reload={reload} /> };
+  const content: Record<string, ReactNode> = { dashboard: <Dashboard data={data} />, cash: <NewCashRegister data={data} reload={reload} queue={saleQueue} onQueueConsumed={() => setSaleQueue([])} />, customers: <Customers data={data} reload={reload} />, warehouse: <Warehouse data={data} reload={reload} />, inventory: <Inventory data={data} />, reorder: <ReorderList data={data} />, transfers: <Transfers data={data} reload={reload} />, load: <QuickLoad data={data} reload={reload} />, documents: <Documents data={data} reload={reload} />, register: <Register data={data} />, reports: <CashReports data={data} />, gifts: <GiftSummary data={data} reload={reload} />, reservations: <ReservationSummary data={data} reload={reload} />, analytics: <Analytics data={data} />, storico: <ActivityLog />, fiscal: <FiscalRegisters data={data} reload={reload} />, settings: <Settings reload={reload} /> };
   const syncTime = new Date(data.generatedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const syncLabel = syncState === "offline" ? "Connessione assente" : syncState === "syncing" ? "Sincronizzazione…" : "Dati in tempo reale";
-  return <div className="app-shell"><button className={`mobile-menu ${menuOpen ? "open" : ""}`} onClick={() => setMenuOpen((value) => !value)} aria-label={menuOpen ? "Chiudi menu" : "Apri menu"} aria-expanded={menuOpen}><MaterialIcon>{menuOpen ? "close" : "menu"}</MaterialIcon></button>{menuOpen && <button className="mobile-menu-backdrop" onClick={() => setMenuOpen(false)} aria-label="Chiudi menu" />}<aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="sidebar-brand"><div className="brand-mark small-mark"><img src="/ms-logo.png" alt="" /></div><img className="sidebar-wordmark" src="/gestionale-wordmark.png" alt="Gestionale Stefano Marinelli" /></div><nav>{user.role === "admin" ? adminMenuGroups.map((group) => <div className="nav-group" key={group.label || "top"}>{group.label && <p className="nav-group-title">{group.label}</p>}{group.items.map(navButton)}</div>) : cashierMenu.map(navButton)}</nav><button type="button" className={`sidebar-sync ${syncState}`} onClick={() => void reload()} title="Aggiorna ora"><i /><span><strong>{syncLabel}</strong><small>{syncState === "offline" ? "Clicca per riprovare" : `Aggiornato alle ${syncTime}`}</small></span></button><div className="sidebar-user"><div className="avatar">{user.displayName.slice(0, 2).toUpperCase()}</div><span><strong>{user.displayName}</strong><small>{user.store ?? "Amministrazione"}</small></span><button className="icon-button" onClick={logout} title="Esci" aria-label="Esci"><MaterialIcon>logout</MaterialIcon></button></div></aside><main className="app-main">{content[page] ?? content.cash}</main></div>;
+  return <div className="app-shell"><button className={`mobile-menu ${menuOpen ? "open" : ""}`} onClick={() => setMenuOpen((value) => !value)} aria-label={menuOpen ? "Chiudi menu" : "Apri menu"} aria-expanded={menuOpen}><MaterialIcon>{menuOpen ? "close" : "menu"}</MaterialIcon></button>{menuOpen && <button className="mobile-menu-backdrop" onClick={() => setMenuOpen(false)} aria-label="Chiudi menu" />}<aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="sidebar-brand"><div className="brand-mark small-mark"><img src="/ms-logo.png" alt="" /></div><img className="sidebar-wordmark" src="/gestionale-wordmark.png" alt="Gestionale Stefano Marinelli" /></div><nav>{user.role === "admin" ? adminMenuGroups.map((group) => <div className="nav-group" key={group.label || "top"}>{group.label && <p className="nav-group-title">{group.label}</p>}{group.items.map(navButton)}</div>) : cashierMenu.map(navButton)}</nav><button type="button" className={`sidebar-sync ${syncState}`} onClick={() => void reload()} title="Aggiorna ora"><i /><span><strong>{syncLabel}</strong><small>{syncState === "offline" ? "Clicca per riprovare" : `Aggiornato alle ${syncTime}`}</small></span></button><div className="sidebar-user"><div className="avatar">{user.displayName.slice(0, 2).toUpperCase()}</div><span><strong>{user.displayName}</strong><small>{user.store ?? "Amministrazione"}</small></span><button className="icon-button" onClick={logout} title="Esci" aria-label="Esci"><MaterialIcon>logout</MaterialIcon></button></div></aside><main className="app-main">{content[page] ?? content.cash}</main>{scanned && <Modal title="Prodotto scansionato" onClose={() => setScanned(null)}><ScanInfo data={data} product={scanned} onAdd={addToSale} /></Modal>}{scanNotice && <div className="scan-toast" role="status">{scanNotice}{saleQueue.length > 0 && page !== "cash" && <button className="secondary small" onClick={() => { setPage("cash"); setScanNotice(""); }}>Vai in Cassa ({saleQueue.length})</button>}</div>}</div>;
 }

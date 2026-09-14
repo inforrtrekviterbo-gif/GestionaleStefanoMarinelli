@@ -450,7 +450,7 @@ function ReturnForm({ store, add, close }: { store: Store; add: (item: CartItem)
   return <form className="stack" onSubmit={submit}><p className="muted">Scansiona l’EAN di un prodotto oppure inserisci lo scontrino per scegliere anche una vendita “Varie”. Il prezzo di reso è sempre quello finale realmente pagato.</p><div className="return-receipt-search"><ClearableInput label="Scontrino originale" value={receipt} onChange={(value) => { setReceipt(value); setSelectedLine(null); setReceiptLines([]); }} placeholder="Es. VT-… o GS-…" /><button type="button" className="secondary align-end" onClick={() => void loadReceipt()}>Carica righe scontrino</button></div>{receiptLines.length > 0 && <div className="choice-list return-line-list">{receiptLines.map((line) => <button type="button" className={selectedLine?.saleItemId === line.saleItemId ? "selected" : ""} key={line.saleItemId} onClick={() => { setSelectedLine(line); setQuantity("1"); }}><span><strong>{line.description}</strong><small>{line.itemType === "service" ? "Vendita Varie" : "Prodotto"} · restituibili {line.returnableQty}</small></span><b>{money(line.finalUnitPrice)}</b></button>)}</div>}<div className="return-divider"><span>oppure usa l’EAN prodotto</span></div><ClearableInput label="EAN prodotto restituito" value={ean} onChange={(value) => { setEan(value); if (/^\d{13}$/.test(value.trim())) void recognize(value); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void recognize(); } }} inputMode="numeric" autoFocus /><button type="button" className="secondary" onClick={() => void recognize()}>Trova vendita e prezzo finale</button>{selectedLine && <div className="return-sale-card"><div><span>Riga da restituire</span><strong>{selectedLine.description}</strong></div><div><span>Vendita originale</span><strong>{selectedLine.receiptNo}</strong><small>{new Date(selectedLine.createdAt).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })} · {selectedLine.customerName}</small></div><div><span>Prezzo finale pagato</span><strong>{money(selectedLine.finalUnitPrice)}</strong><small>Prezzo riga {money(selectedLine.unitPrice)} · sconto {selectedLine.discountPercent}%</small></div><div><span>Quantità restituibile</span><strong>{selectedLine.returnableQty} di {selectedLine.purchasedQty}</strong><small>Già restituiti: {selectedLine.returnedQty}</small></div>{selectedLine.originalGiftCode && <div><span>Pagamento originale</span><strong>Buono regalo</strong><small>Se resta credito verrà generato automaticamente un nuovo buono intestato alla stessa persona.</small></div>}</div>}{error && <div className="alert danger">{error}</div>}{selectedLine && <ClearableInput label="Quantità da rendere" type="number" min="1" max={selectedLine.returnableQty} step="1" value={quantity} onChange={setQuantity} />}<div className="form-actions"><button type="button" className="secondary" onClick={close}>Annulla</button><button className="primary" disabled={!selectedLine}>Aggiungi reso al cambio</button></div></form>;
 }
 
-export default function CashRegister({ data, reload }: { data: CashData; reload: () => Promise<void> }) {
+export default function CashRegister({ data, reload, queue, onQueueConsumed }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void }) {
   const [adminStore, setAdminStore] = useState<Store>("Viterbo");
   const store = data.user.store ?? adminStore;
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -508,6 +508,14 @@ export default function CashRegister({ data, reload }: { data: CashData; reload:
     });
     setTotalOverride(""); setError(""); setNotice(`${product.name} aggiunto automaticamente al carrello.`);
   }
+
+  // Drena la coda "aggiungi alla vendita" arrivata da scansioni fuori dalla cassa.
+  useEffect(() => {
+    if (!queue?.length) return;
+    for (const productId of queue) { const product = data.products.find((item) => item.id === productId); if (product) addProduct(product); }
+    onQueueConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue]);
 
   function addDraft(item: CartItem) { setCart((current) => [...current, item]); setTotalOverride(""); setModal(null); }
   function updateItem(key: string, change: Partial<CartItem>) { setCart((current) => current.map((item) => item.key === key ? { ...item, ...change } : item)); setTotalOverride(""); }
