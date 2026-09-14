@@ -8,6 +8,7 @@ import { onValue, ref } from "firebase/database";
 import NewCashRegister, { localFiscalBridgeRequest } from "./cash-register";
 import PwaInstallButton from "./pwa-install";
 import { establishServerSession, firebaseAuth, firebaseAuthenticatedFetch, firebaseDatabase, firebaseEmailForUsername } from "../lib/firebase-client";
+import { isClientTestMode } from "./test-mode-banner";
 import { firebaseStoreNode } from "../lib/firebase-config";
 
 type Store = "Viterbo" | "Gran Sasso";
@@ -66,6 +67,7 @@ async function readJson(response: Response) {
 }
 
 async function post(action: string, values: Record<string, unknown> = {}) {
+  if (isClientTestMode()) throw new Error("Modalità TEST attiva: operazione non salvata (nessuna scrittura).");
   return readJson(await firebaseAuthenticatedFetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...values }) }));
 }
 
@@ -258,6 +260,7 @@ function QuickLoad({ data, reload }: { data: Bootstrap; reload: () => Promise<vo
   async function create(event: React.FormEvent) {
     event.preventDefault(); setError(""); setMessage(""); setSaving(true);
     try {
+      if (isClientTestMode()) throw new Error("Modalità TEST attiva: prodotto non salvato (nessuna scrittura).");
       const createdName = form.name;
       const body = new FormData();
       body.append("payload", JSON.stringify({ ...form, variants: variants.map(({ sku, color, size, eans, viterboQty, viterboReorderLevel, granSassoQty, granSassoReorderLevel }) => ({ sku, color, size, eans: eans.split(",").map((value) => value.trim()).filter(Boolean), viterboQty, viterboReorderLevel, granSassoQty, granSassoReorderLevel })) }));

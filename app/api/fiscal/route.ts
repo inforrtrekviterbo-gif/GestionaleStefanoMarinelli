@@ -1,4 +1,4 @@
-import { database, ensureDatabase, hashToken, json, type Store } from "../../../lib/runtime-db";
+import { database, ensureDatabase, hashToken, isTestMode, json, type Store } from "../../../lib/runtime-db";
 
 type Device = {
   id: number;
@@ -82,6 +82,7 @@ export async function POST(request: Request) {
   if (!store) return json({ error: "Negozio non valido." }, 400);
   const device = await authenticate(request, store);
   if (!device) return json({ error: "Ponte Windows non autorizzato o disabilitato." }, 401);
+  if (isTestMode(request)) return json({ ok: true, testMode: true, message: "Modalità TEST: nessuna scrittura." });
   const action = textValue(body.action, 30);
   if (action === "heartbeat") {
     await heartbeat(device, textValue(body.status, 80) || "online", textValue(body.error));

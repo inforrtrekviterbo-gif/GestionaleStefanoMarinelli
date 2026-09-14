@@ -1,5 +1,5 @@
 import { clearRealtimeSales, saveSaleToRealtimeDatabase, verifiedFirebaseIdentityFromRequest, type VerifiedFirebaseIdentity } from "../../../lib/firebase-server";
-import { currentUser, database, ean13, ensureDatabase, hashToken, idCode, json, type SessionUser, type Store } from "../../../lib/runtime-db";
+import { currentUser, database, ean13, ensureDatabase, hashToken, idCode, isTestMode, json, type SessionUser, type Store } from "../../../lib/runtime-db";
 import { getBucket } from "../../../lib/storage";
 
 type JsonMap = Record<string, unknown>;
@@ -1043,6 +1043,7 @@ export async function POST(request: Request) {
   await ensureDatabase();
   const auth = await requireUser(request);
   if (auth.response || !auth.user) return auth.response;
+  if (isTestMode(request)) return json({ ok: true, testMode: true, message: "Modalità TEST: nessuna scrittura." });
   const body = objectValue(await request.json().catch(() => ({})));
   const action = stringValue(body.action);
   try {

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import TestModeBanner from "./test-mode-banner";
 
 export const metadata: Metadata = {
   title: "Gestionale di Marinelli Stefano",
@@ -31,7 +32,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="it">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <TestModeBanner />
+        {children}
+      </body>
     </html>
   );
 }

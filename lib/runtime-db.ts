@@ -179,6 +179,11 @@ function cookieValue(request: Request, name: string) {
   return null;
 }
 
+/** Vero se il client e' in modalita' TEST (cookie gestionale_mode=test). */
+export function isTestMode(request: Request): boolean {
+  return cookieValue(request, "gestionale_mode") === "test";
+}
+
 export async function currentUser(request: Request): Promise<SessionUser | null> {
   await ensureDatabase();
   const token = cookieValue(request, "gestionale_session");

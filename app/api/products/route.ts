@@ -1,4 +1,4 @@
-import { currentUser, database, ensureDatabase, json } from "../../../lib/runtime-db";
+import { currentUser, database, ensureDatabase, isTestMode, json } from "../../../lib/runtime-db";
 import { getBucket } from "../../../lib/storage";
 
 type R2ObjectBodyLike = {
@@ -96,6 +96,7 @@ export async function POST(request: Request) {
   await ensureDatabase();
   const user = await requireUser(request);
   if (!user) return json({ error: "Sessione scaduta." }, 401);
+  if (isTestMode(request)) return json({ ok: true, testMode: true, variantCount: 0, photos: 0, message: "Modalità TEST: nessuna scrittura." });
 
   const formData = await request.formData();
   const payloadRaw = formData.get("payload");
