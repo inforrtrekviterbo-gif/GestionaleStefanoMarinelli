@@ -654,3 +654,15 @@ td small { margin-top: .16rem; font-size: .62rem; }
 .stock-input:focus { outline: 2px solid var(--green); border-color: var(--green); }
 .warehouse-low > td { background: var(--danger-bg); }
 .status.warning { background: #fff3cd; color: #7a5b00; }
+
+/* --- Menu raggruppato --- */
+.nav-group { margin-bottom: 10px; }
+.nav-group-title { margin: 12px 12px 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); opacity: 0.7; }
+
+/* --- Scheda prodotto --- */
+.warehouse-group-name { text-align: left; }
+.warehouse-group-name:hover strong { text-decoration: underline; }
+.product-detail-top { margin-bottom: 16px; }
+.product-detail-card { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+.product-detail-card .metric-grid { flex: 1 1 320px; }
+.product-detail-photo { width: 140px; height: 140px; object-fit: cover; border-radius: 12px; border: 1px solid var(--line); }
