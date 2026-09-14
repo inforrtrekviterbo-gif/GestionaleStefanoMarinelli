@@ -20,6 +20,9 @@ export type LoginProfile = {
 };
 
 export const loginProfiles: Record<string, LoginProfile> = {
+  // Account di prova (ruolo admin per vedere tutto). Crea l'utente in Supabase
+  // Auth con email test@gestionale.local e una password di almeno 6 caratteri.
+  test: { username: "test", email: "test@gestionale.local", role: "admin", store: null, displayName: "Test" },
   admin: { username: "admin", email: "admin@gestionale.local", role: "admin", store: null, displayName: "Amministratore" },
   viterbo: { username: "viterbo", email: "viterbo@gestionale.local", role: "viterbo", store: "Viterbo", displayName: "Cassa Viterbo" },
   "gran-sasso": { username: "gran-sasso", email: "gran-sasso@gestionale.local", role: "gran_sasso", store: "Gran Sasso", displayName: "Cassa Gran Sasso" },
