@@ -371,6 +371,19 @@ async function updateProduct(user: SessionUser, body: JsonMap) {
   return json({ ok: true });
 }
 
+async function setStock(user: SessionUser, body: JsonMap) {
+  const productId = Math.round(numberValue(body.id));
+  const store = validStore(body.store) ? body.store : null;
+  if (!store) return json({ error: "Negozio non valido." }, 400);
+  if (user.role !== "admin" && user.store !== store) return json({ error: "Non puoi modificare la giacenza dell'altro negozio." }, 403);
+  const quantity = Math.max(0, Math.round(numberValue(body.quantity)));
+  const inventory = await database().prepare(`SELECT reserved FROM inventory WHERE product_id = ? AND store = ?`).bind(productId, store).first<{ reserved: number }>();
+  if (!inventory) return json({ error: "Giacenza non trovata." }, 404);
+  if (quantity < Number(inventory.reserved)) return json({ error: "La giacenza non può essere inferiore ai pezzi prenotati." }, 409);
+  await database().prepare(`UPDATE inventory SET quantity = ? WHERE product_id = ? AND store = ?`).bind(quantity, productId, store).run();
+  return json({ ok: true, quantity });
+}
+
 async function deleteProduct(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const productId = Math.round(numberValue(body.id));
@@ -982,6 +995,7 @@ export async function POST(request: Request) {
     if (action === "quickLoad") return quickLoad(auth.user, body);
     if (action === "createProduct") return createProduct(auth.user, body);
     if (action === "updateProduct") return updateProduct(auth.user, body);
+    if (action === "setStock") return setStock(auth.user, body);
     if (action === "deleteProduct") return deleteProduct(auth.user, body);
     if (action === "updateGift") return updateGift(auth.user, body);
     if (action === "deleteGift") return deleteGift(auth.user, body);

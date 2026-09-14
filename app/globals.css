@@ -641,3 +641,16 @@ td small { margin-top: .16rem; font-size: .62rem; }
   .fiscal-job { grid-template-columns: 1fr auto; }
   .fiscal-job .text-button { grid-column: 1 / -1; justify-self: start; }
 }
+
+/* --- Magazzino unico --- */
+.warehouse-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-bottom: 14px; }
+.warehouse-toolbar .field { flex: 1 1 260px; }
+.checkbox-inline { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-soft); white-space: nowrap; cursor: pointer; }
+.warehouse-group-row > td { background: var(--paper); border-top: 2px solid var(--line); }
+.warehouse-group-row .text-button { display: inline-flex; align-items: center; gap: 6px; }
+.warehouse-group-row small { color: var(--ink-soft); font-weight: 500; margin-left: 8px; }
+.warehouse-group-row .secondary.small { margin-left: 12px; }
+.stock-input { width: 84px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; text-align: right; }
+.stock-input:focus { outline: 2px solid var(--green); border-color: var(--green); }
+.warehouse-low > td { background: var(--danger-bg); }
+.status.warning { background: #fff3cd; color: #7a5b00; }
