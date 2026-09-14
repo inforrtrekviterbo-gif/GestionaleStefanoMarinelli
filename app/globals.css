@@ -1,6 +1,13 @@
-/* I font (Manrope + Material Symbols) sono caricati via <link> in app/layout.tsx:
-   il bundler CSS scartava il secondo @import url() rompendo le icone. */
+/* Manrope via <link> in layout.tsx. Material Symbols self-hosted qui sotto. */
 @import "tailwindcss";
+
+@font-face {
+  font-family: "Material Symbols Rounded";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+  src: url("/fonts/material-symbols-rounded.ttf") format("truetype");
+}
 
 :root {
   color-scheme: dark;
