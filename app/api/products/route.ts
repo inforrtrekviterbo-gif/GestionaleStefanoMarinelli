@@ -1,4 +1,4 @@
-import { currentUser, database, ensureDatabase, isTestMode, json } from "../../../lib/runtime-db";
+import { currentUser, database, ensureDatabase, isTestMode, json, logActivity } from "../../../lib/runtime-db";
 import { getBucket } from "../../../lib/storage";
 
 type R2ObjectBodyLike = {
@@ -185,5 +185,6 @@ export async function POST(request: Request) {
     return json({ error: error instanceof Error ? error.message : "Articolo non creato." }, 400);
   }
 
+  await logActivity({ user, action: existingGroup ? "variant" : "create", entity: "product", entityId: createdIds[0] ?? null, detail: `${brand} ${name} · ${createdIds.length} ${createdIds.length === 1 ? "variante" : "varianti"}` });
   return json({ ok: true, productId: variantGroup, productCount: 1, variantCount: createdIds.length, photos: photoKeys.size });
 }

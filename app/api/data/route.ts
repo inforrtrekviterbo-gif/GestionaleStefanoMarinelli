@@ -1,4 +1,4 @@
-import { currentUser, database, ean13, ensureDatabase, hashToken, idCode, isTestMode, json, type SessionUser, type Store } from "../../../lib/runtime-db";
+import { currentUser, database, ean13, ensureDatabase, hashToken, idCode, isTestMode, json, logActivity, type SessionUser, type Store } from "../../../lib/runtime-db";
 import { getBucket } from "../../../lib/storage";
 
 type JsonMap = Record<string, unknown>;
@@ -208,6 +208,15 @@ export async function GET(request: Request) {
     const items = await all(`SELECT ti.product_id AS productId, ti.quantity, COALESCE(p.name, ti.description) AS name, COALESCE(p.brand, '') AS brand, COALESCE(p.color, '') AS color, COALESCE(p.size, '') AS size FROM transfer_items ti LEFT JOIN products p ON p.id = ti.product_id WHERE ti.transfer_id = ? ORDER BY ti.id`, transferId);
     return json({ transfer, items });
   }
+  if (view === "activity") {
+    if (auth.user.role !== "admin") return json({ error: "Funzione riservata all'amministratore." }, 403);
+    const entity = url.searchParams.get("entity");
+    const entityId = url.searchParams.get("entityId");
+    const activity = entity && entityId
+      ? await all(`SELECT id, created_at AS createdAt, username, action, entity, entity_id AS entityId, detail, store FROM activity_log WHERE entity = ? AND entity_id = ? ORDER BY id DESC LIMIT 200`, entity, Math.round(numberValue(entityId)))
+      : await all(`SELECT id, created_at AS createdAt, username, action, entity, entity_id AS entityId, detail, store FROM activity_log ORDER BY id DESC LIMIT 300`);
+    return json({ activity }, 200, { "Cache-Control": "private, no-store, max-age=0" });
+  }
   if (view === "customer") {
     const customerId = numberValue(url.searchParams.get("id"));
     const customer = await database().prepare(`SELECT id, customer_type AS customerType, first_name AS firstName, last_name AS lastName, company_name AS companyName, vat_number AS vatNumber, pec, sdi_code AS sdiCode, phone, email, address, postal_code AS postalCode, city, province, tax_code AS taxCode, scope, created_store AS createdStore FROM customers WHERE id = ?`).bind(customerId).first<{ createdStore: string } & Record<string, unknown>>();
@@ -329,6 +338,7 @@ async function deleteCustomer(user: SessionUser, body: JsonMap) {
   const customerId = Math.round(numberValue(body.id));
   const result = await database().prepare(`UPDATE customers SET active = 0 WHERE id = ? AND active = 1`).bind(customerId).run();
   if (!result.meta?.changes) return json({ error: "Cliente non trovato." }, 404);
+  await logActivity({ user, action: "delete", entity: "customer", entityId: customerId });
   return json({ ok: true });
 }
 
@@ -381,13 +391,14 @@ async function setStock(user: SessionUser, body: JsonMap) {
   if (!inventory) return json({ error: "Giacenza non trovata." }, 404);
   if (quantity < Number(inventory.reserved)) return json({ error: "La giacenza non può essere inferiore ai pezzi prenotati." }, 409);
   await database().prepare(`UPDATE inventory SET quantity = ? WHERE product_id = ? AND store = ?`).bind(quantity, productId, store).run();
+  await logActivity({ user, action: "stock", entity: "product", entityId: productId, detail: `Giacenza ${store} impostata a ${quantity}`, store });
   return json({ ok: true, quantity });
 }
 
 async function deleteProduct(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const productId = Math.round(numberValue(body.id));
-  const product = await database().prepare(`SELECT variant_group AS variantGroup FROM products WHERE id = ?`).bind(productId).first<{ variantGroup: string | null }>();
+  const product = await database().prepare(`SELECT variant_group AS variantGroup, name, color, size FROM products WHERE id = ?`).bind(productId).first<{ variantGroup: string | null; name: string; color: string; size: string }>();
   if (!product) return json({ error: "Prodotto non trovato." }, 404);
   // Blocca se ci sono pezzi impegnati (prenotazioni/acconti aperti).
   const reserved = await database().prepare(`SELECT COALESCE(SUM(reserved), 0) AS reserved FROM inventory WHERE product_id = ?`).bind(productId).first<{ reserved: number }>();
@@ -407,6 +418,7 @@ async function deleteProduct(user: SessionUser, body: JsonMap) {
   ]);
   const remaining = product.variantGroup ? await database().prepare(`SELECT id FROM products WHERE variant_group = ? LIMIT 1`).bind(product.variantGroup).first() : null;
   if (!remaining && product.variantGroup) await database().prepare(`DELETE FROM catalog_products WHERE id = ?`).bind(product.variantGroup).run();
+  await logActivity({ user, action: "delete", entity: "product", entityId: productId, detail: `${product.name} ${product.color} ${product.size}` });
   return json({ ok: true });
 }
 
@@ -430,6 +442,7 @@ async function deleteGift(user: SessionUser, body: JsonMap) {
   const giftId = Math.round(numberValue(body.id));
   const result = await database().prepare(`UPDATE gift_cards SET balance = 0, status = 'deleted' WHERE id = ? AND status <> 'deleted'`).bind(giftId).run();
   if (!result.meta?.changes) return json({ error: "Buono non trovato." }, 404);
+  await logActivity({ user, action: "delete", entity: "gift", entityId: giftId });
   return json({ ok: true });
 }
 
@@ -471,6 +484,7 @@ async function deleteReservation(user: SessionUser, body: JsonMap) {
   if (reservation.status === "open") await adjustReservationStock(reservationId, reservation.store, -1);
   const db = database();
   await db.batch([db.prepare(`DELETE FROM reservation_items WHERE reservation_id = ?`).bind(reservationId), db.prepare(`DELETE FROM reservations WHERE id = ?`).bind(reservationId)]);
+  await logActivity({ user, action: "delete", entity: "reservation", entityId: reservationId });
   return json({ ok: true });
 }
 
@@ -526,6 +540,7 @@ async function deleteTransfer(user: SessionUser, body: JsonMap) {
   statements.push(db.prepare(`DELETE FROM transfer_items WHERE transfer_id = ?`).bind(transferId));
   statements.push(db.prepare(`DELETE FROM transfers WHERE id = ?`).bind(transferId));
   await db.batch(statements);
+  await logActivity({ user, action: "delete", entity: "transfer", entityId: transferId });
   return json({ ok: true });
 }
 
@@ -799,6 +814,7 @@ async function createSale(user: SessionUser, body: JsonMap) {
     fiscalJob = job ?? null;
     await database().prepare(`UPDATE sales SET fiscal_status = ? WHERE id = ?`).bind(jobStatus, saleId).run();
   }
+  await logActivity({ user, action: "sale", entity: "sale", entityId: Number(saleId), detail: `Vendita ${receiptNo} · ${total.toFixed(2)}€`, store });
   return json({ ok: true, saleId, receiptNo, automaticFiscalDocument: bank > 0 ? fiscalDocumentType : null, invoiceDocument, fiscalJob, localFiscalTicket, localFiscalPayload: localFiscalTicket ? fiscalPayload : null, replacementGift, persisted: true });
 }
 
@@ -912,6 +928,7 @@ async function createTransfer(user: SessionUser, body: JsonMap) {
     await database().prepare(`UPDATE inventory SET quantity = quantity - ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, fromStore).run();
     await database().prepare(`UPDATE inventory SET quantity = quantity + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, toStore).run();
   }
+  await logActivity({ user, action: "transfer", entity: "transfer", entityId: Number(transferId), detail: `DDT ${code} · ${fromStore} → ${toStore}`, store: fromStore });
   return json({ ok: true, transferId, code });
 }
 
@@ -922,6 +939,7 @@ async function quickLoad(user: SessionUser, body: JsonMap) {
   const product = await database().prepare(`SELECT p.id, p.name, p.color, p.size FROM products p JOIN product_eans pe ON pe.product_id = p.id WHERE pe.ean = ? AND p.active = 1`).bind(ean).first<{ id: number; name: string; color: string; size: string }>();
   if (!product) return json({ error: "EAN non riconosciuto." }, 404);
   await database().prepare(`UPDATE inventory SET quantity = quantity + ? WHERE product_id = ? AND store = ?`).bind(quantity, product.id, store).run();
+  await logActivity({ user, action: "load", entity: "product", entityId: product.id, detail: `Carico +${quantity} (${product.name} ${product.color} ${product.size})`, store });
   return json({ ok: true, product, quantity, store });
 }
 
