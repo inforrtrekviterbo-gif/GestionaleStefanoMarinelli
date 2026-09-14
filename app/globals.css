@@ -1,5 +1,5 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400..800&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0,0&display=swap");
+/* I font (Manrope + Material Symbols) sono caricati via <link> in app/layout.tsx:
+   il bundler CSS scartava il secondo @import url() rompendo le icone. */
 @import "tailwindcss";
 
 :root {
