@@ -179,7 +179,7 @@ async function bootstrap(user: SessionUser) {
   const sales = user.role === "admin" ? allSales : allSales.filter((sale) => sale.store === user.store);
   const giftRows = await all<{ store: string } & Record<string, unknown>>(`SELECT id, code, beneficiary, initial_value AS initialValue, balance, expires_at AS expiresAt, store, issued_sale_id AS issuedSaleId, status, created_at AS createdAt FROM gift_cards WHERE status <> 'deleted' ORDER BY created_at DESC LIMIT 500`);
   const reservationRows = await all<{ store: string } & Record<string, unknown>>(`SELECT r.id, r.code, r.store, r.customer_id AS customerId, r.product_id AS productId, r.description, r.kind, r.total_price AS totalPrice, r.deposit_amount AS depositAmount, r.balance_due AS balanceDue, r.status, r.issued_sale_id AS issuedSaleId, r.created_at AS createdAt, COALESCE(CASE WHEN c.customer_type = 'company' THEN c.company_name ELSE TRIM(c.first_name || ' ' || c.last_name) END, '') AS customerName, (SELECT COALESCE(SUM(ri.quantity), 0) FROM reservation_items ri WHERE ri.reservation_id = r.id) AS itemCount, (SELECT COALESCE(GROUP_CONCAT(ri.description, ' '), '') FROM reservation_items ri WHERE ri.reservation_id = r.id) AS itemDescriptions FROM reservations r LEFT JOIN customers c ON c.id = r.customer_id ORDER BY r.created_at DESC LIMIT 500`);
-  const transferRows = await all<{ fromStore: string } & Record<string, unknown>>(`SELECT t.id, t.code, t.from_store AS fromStore, t.to_store AS toStore, t.sender, t.receiver, t.carrier, t.transport_reason AS transportReason, t.created_at AS createdAt, COUNT(ti.id) AS lineCount, COALESCE(SUM(ti.quantity), 0) AS totalQuantity FROM transfers t LEFT JOIN transfer_items ti ON ti.transfer_id = t.id GROUP BY t.id ORDER BY t.created_at DESC LIMIT 300`);
+  const transferRows = await all<{ fromStore: string } & Record<string, unknown>>(`SELECT t.id, t.code, t.from_store AS fromStore, t.to_store AS toStore, t.sender, t.receiver, t.carrier, t.transport_reason AS transportReason, t.status, t.note, t.completed_at AS completedAt, t.created_at AS createdAt, COUNT(ti.id) AS lineCount, COALESCE(SUM(ti.quantity), 0) AS totalQuantity FROM transfers t LEFT JOIN transfer_items ti ON ti.transfer_id = t.id GROUP BY t.id ORDER BY t.created_at DESC LIMIT 300`);
   const gifts = user.role === "admin" ? giftRows : giftRows.filter((gift) => gift.store === user.store);
   const reservations = user.role === "admin" ? reservationRows : reservationRows.filter((reservation) => reservation.store === user.store);
   const transfers = user.role === "admin" ? transferRows : transferRows.filter((transfer) => transfer.fromStore === user.store);
@@ -900,36 +900,68 @@ async function failLocalFiscalJob(user: SessionUser, body: JsonMap) {
 }
 
 async function createTransfer(user: SessionUser, body: JsonMap) {
+  // Crea una RICHIESTA di trasferimento (in attesa). La merce si sposta solo
+  // quando l'admin la completa.
   const fromStore = validStore(body.fromStore) ? body.fromStore : user.store;
   if (!fromStore) return json({ error: "Seleziona il magazzino di partenza." }, 400);
-  if (user.role !== "admin" && user.store !== fromStore) return json({ error: "Puoi trasferire solo dal tuo negozio." }, 403);
+  if (user.role !== "admin" && user.store !== fromStore) return json({ error: "Puoi richiedere trasferimenti solo dal tuo negozio." }, 403);
   const toStore: Store = fromStore === "Viterbo" ? "Gran Sasso" : "Viterbo";
   const items = normalizeItems(body.items).filter((item) => item.productId && item.quantity > 0);
   if (!items.length) return json({ error: "Aggiungi almeno un prodotto." }, 400);
-  const insufficient: { productId: number | null; description: string; requested: number; available: number }[] = [];
-  for (const item of items) {
-    const row = await database().prepare(`SELECT quantity, reserved FROM inventory WHERE product_id = ? AND store = ?`).bind(item.productId, fromStore).first<{ quantity: number; reserved: number }>();
-    const available = (row?.quantity ?? 0) - (row?.reserved ?? 0);
-    if (available < item.quantity) insufficient.push({ productId: item.productId, description: item.description, requested: item.quantity, available });
-  }
-  if (insufficient.length) return json({ error: "Quantità insufficiente per il trasferimento.", insufficient }, 409);
-
-  const sender = stringValue(body.sender);
-  const receiver = stringValue(body.receiver);
-  const carrier = stringValue(body.carrier);
-  if (!sender || !receiver || !carrier) return json({ error: "Compila mittente, ricevente e vettore." }, 400);
   const code = idCode("DDT");
-  const transfer = await database().prepare(`INSERT INTO transfers (code, from_store, to_store, sender, receiver, carrier, transport_reason, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(code, fromStore, toStore, sender, receiver, carrier, stringValue(body.transportReason, "Trasferimento merce"), user.id, new Date().toISOString()).run();
+  const now = new Date().toISOString();
+  const transfer = await database().prepare(`INSERT INTO transfers (code, from_store, to_store, transport_reason, status, note, created_by, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`)
+    .bind(code, fromStore, toStore, stringValue(body.transportReason, "Trasferimento merce"), stringValue(body.note) || null, user.id, now).run();
   const transferId = transfer.meta?.last_row_id;
-  if (!transferId) return json({ error: "Trasferimento non registrato." }, 500);
+  if (!transferId) return json({ error: "Richiesta non registrata." }, 500);
   for (const item of items) {
     await database().prepare(`INSERT INTO transfer_items (transfer_id, product_id, description, quantity) VALUES (?, ?, ?, ?)`).bind(transferId, item.productId, item.description, item.quantity).run();
-    await database().prepare(`UPDATE inventory SET quantity = quantity - ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, fromStore).run();
-    await database().prepare(`UPDATE inventory SET quantity = quantity + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, toStore).run();
   }
-  await logActivity({ user, action: "transfer", entity: "transfer", entityId: Number(transferId), detail: `DDT ${code} · ${fromStore} → ${toStore}`, store: fromStore });
+  await logActivity({ user, action: "transfer_request", entity: "transfer", entityId: Number(transferId), detail: `Richiesta ${code} · ${fromStore} → ${toStore}`, store: fromStore });
   return json({ ok: true, transferId, code });
+}
+
+async function completeTransfer(user: SessionUser, body: JsonMap) {
+  const denied = adminOnly(user); if (denied) return denied;
+  const id = Math.round(numberValue(body.id));
+  const transfer = await database().prepare(`SELECT id, code, from_store AS fromStore, to_store AS toStore, status FROM transfers WHERE id = ?`).bind(id).first<{ id: number; code: string; fromStore: Store; toStore: Store; status: string }>();
+  if (!transfer) return json({ error: "Trasferimento non trovato." }, 404);
+  if (transfer.status !== "pending") return json({ error: "Questo trasferimento non è più in attesa." }, 409);
+  const items = await all<{ productId: number | null; quantity: number; description: string }>(`SELECT product_id AS productId, quantity, description FROM transfer_items WHERE transfer_id = ?`, id);
+  const insufficient: { description: string; available: number }[] = [];
+  for (const item of items) {
+    if (!item.productId) continue;
+    const row = await database().prepare(`SELECT quantity, reserved FROM inventory WHERE product_id = ? AND store = ?`).bind(item.productId, transfer.fromStore).first<{ quantity: number; reserved: number }>();
+    const available = (row?.quantity ?? 0) - (row?.reserved ?? 0);
+    if (available < item.quantity) insufficient.push({ description: item.description, available });
+  }
+  if (insufficient.length) return json({ error: "Giacenza insufficiente per completare il trasferimento.", insufficient }, 409);
+  const now = new Date().toISOString();
+  const db = database();
+  const statements = [];
+  for (const item of items) {
+    if (!item.productId) continue;
+    statements.push(db.prepare(`UPDATE inventory SET quantity = quantity - ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, transfer.fromStore));
+    statements.push(db.prepare(`UPDATE inventory SET quantity = quantity + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, transfer.toStore));
+  }
+  const sender = stringValue(body.sender) || transfer.fromStore;
+  const receiver = stringValue(body.receiver) || transfer.toStore;
+  const carrier = stringValue(body.carrier) || "Trasporto interno";
+  statements.push(db.prepare(`UPDATE transfers SET status = 'accepted', sender = ?, receiver = ?, carrier = ?, completed_at = ? WHERE id = ?`).bind(sender, receiver, carrier, now, id));
+  await db.batch(statements);
+  await logActivity({ user, action: "transfer", entity: "transfer", entityId: id, detail: `Completato ${transfer.code} · ${transfer.fromStore} → ${transfer.toStore}`, store: transfer.fromStore });
+  return json({ ok: true });
+}
+
+async function rejectTransfer(user: SessionUser, body: JsonMap) {
+  const denied = adminOnly(user); if (denied) return denied;
+  const id = Math.round(numberValue(body.id));
+  const transfer = await database().prepare(`SELECT id, code, status FROM transfers WHERE id = ?`).bind(id).first<{ id: number; code: string; status: string }>();
+  if (!transfer) return json({ error: "Trasferimento non trovato." }, 404);
+  if (transfer.status !== "pending") return json({ error: "Questo trasferimento non è più in attesa." }, 409);
+  await database().prepare(`UPDATE transfers SET status = 'rejected', note = ? WHERE id = ?`).bind(stringValue(body.note) || null, id).run();
+  await logActivity({ user, action: "transfer_reject", entity: "transfer", entityId: id, detail: `Rifiutato ${transfer.code}` });
+  return json({ ok: true });
 }
 
 async function quickLoad(user: SessionUser, body: JsonMap) {
@@ -1023,6 +1055,8 @@ export async function POST(request: Request) {
     if (action === "deleteCustomer") return deleteCustomer(auth.user, body);
     if (action === "createSale") return createSale(auth.user, body);
     if (action === "createTransfer") return createTransfer(auth.user, body);
+    if (action === "completeTransfer") return completeTransfer(auth.user, body);
+    if (action === "rejectTransfer") return rejectTransfer(auth.user, body);
     if (action === "updateTransfer") return updateTransfer(auth.user, body);
     if (action === "deleteTransfer") return deleteTransfer(auth.user, body);
     if (action === "quickLoad") return quickLoad(auth.user, body);

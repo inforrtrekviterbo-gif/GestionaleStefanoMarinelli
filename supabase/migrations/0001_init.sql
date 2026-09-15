@@ -220,10 +220,13 @@ CREATE TABLE IF NOT EXISTS transfers (
   code TEXT NOT NULL UNIQUE,
   from_store TEXT NOT NULL REFERENCES stores(name),
   to_store TEXT NOT NULL REFERENCES stores(name),
-  sender TEXT NOT NULL,
-  receiver TEXT NOT NULL,
-  carrier TEXT NOT NULL,
-  transport_reason TEXT NOT NULL,
+  sender TEXT NOT NULL DEFAULT '',
+  receiver TEXT NOT NULL DEFAULT '',
+  carrier TEXT NOT NULL DEFAULT '',
+  transport_reason TEXT NOT NULL DEFAULT 'Trasferimento merce',
+  status TEXT NOT NULL DEFAULT 'accepted',
+  note TEXT,
+  completed_at TEXT,
   created_by INTEGER NOT NULL REFERENCES users(id),
   created_at TEXT NOT NULL
 );

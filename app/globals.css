@@ -745,3 +745,6 @@ td small { margin-top: .16rem; font-size: .62rem; }
 .product-card .p-price { font-weight: 800; }
 .product-card .p-stock { font-size: .74rem; color: var(--ink-soft); }
 .product-card.low { border-color: #f0c36b; }
+
+/* piccola primaria per azioni in tabella */
+.primary.small { min-height: 34px; padding: .42rem .8rem; font-size: .8rem; }
