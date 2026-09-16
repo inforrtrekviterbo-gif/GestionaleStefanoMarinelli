@@ -748,3 +748,23 @@ td small { margin-top: .16rem; font-size: .62rem; }
 
 /* piccola primaria per azioni in tabella */
 .primary.small { min-height: 34px; padding: .42rem .8rem; font-size: .8rem; }
+
+/* ===== Skeleton di caricamento ===== */
+.skeleton-shell { pointer-events: none; }
+.sk { position: relative; overflow: hidden; background: rgba(120,160,180,.12); border-radius: 12px; }
+.sk::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent); animation: sk-shimmer 1.3s infinite; }
+@keyframes sk-shimmer { 100% { transform: translateX(100%); } }
+.skel-side { padding: 1rem; display: flex; flex-direction: column; gap: 12px; }
+.sk-brand { height: 44px; }
+.sk-nav { height: 34px; }
+.sk-title { height: 40px; width: 40%; margin-bottom: 22px; }
+.sk-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-bottom: 22px; }
+.sk-card { height: 92px; }
+.sk-panel { height: 360px; }
+@media (max-width: 900px) { .sk-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ===== Import CSV ===== */
+.import-help { background: var(--mint); border-radius: 12px; padding: 12px 14px; font-size: .88rem; }
+.import-preview { max-height: 42vh; overflow: auto; margin-top: 12px; }
+.import-row-bad td { background: var(--danger-bg); }
+.import-summary { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0; font-weight: 700; }

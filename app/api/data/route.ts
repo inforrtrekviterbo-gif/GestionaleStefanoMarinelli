@@ -423,6 +423,48 @@ async function deleteProduct(user: SessionUser, body: JsonMap) {
   return json({ ok: true });
 }
 
+async function importProducts(user: SessionUser, body: JsonMap) {
+  const denied = adminOnly(user); if (denied) return denied;
+  const rows = Array.isArray(body.rows) ? (body.rows as JsonMap[]) : [];
+  if (!rows.length) return json({ error: "Nessuna riga da importare." }, 400);
+  if (rows.length > 2000) return json({ error: "Massimo 2000 righe per import." }, 400);
+  const db = database();
+  const now = new Date().toISOString();
+  let created = 0;
+  const skipped: { sku: string; reason: string }[] = [];
+  const groupCache = new Map<string, string>();
+  for (const raw of rows) {
+    const nome = stringValue(raw.nome), marca = stringValue(raw.marca), categoria = stringValue(raw.categoria);
+    const colore = stringValue(raw.colore), taglia = stringValue(raw.taglia), sku = stringValue(raw.sku);
+    const prezzo = Math.round(Math.max(0, numberValue(raw.prezzo)) * 100) / 100;
+    const eans = stringValue(raw.ean).split(/[;,\s]+/).map((value) => value.trim()).filter(Boolean);
+    const vt = Math.max(0, Math.round(numberValue(raw.viterbo)));
+    const gs = Math.max(0, Math.round(numberValue(raw.granSasso)));
+    if (!nome || !marca || !categoria || !colore || !taglia || !sku || prezzo <= 0 || !eans.length) { skipped.push({ sku: sku || "(riga vuota)", reason: "campi obbligatori mancanti" }); continue; }
+    if (await db.prepare(`SELECT id FROM products WHERE LOWER(sku) = LOWER(?)`).bind(sku).first()) { skipped.push({ sku, reason: "SKU già presente" }); continue; }
+    let dupEan = false;
+    for (const ean of eans) { if (await db.prepare(`SELECT id FROM product_eans WHERE ean = ?`).bind(ean).first()) { dupEan = true; break; } }
+    if (dupEan) { skipped.push({ sku, reason: "EAN già presente" }); continue; }
+    const key = `${nome.toLowerCase()}|${marca.toLowerCase()}|${categoria.toLowerCase()}`;
+    let group = groupCache.get(key);
+    if (!group) {
+      const existing = await db.prepare(`SELECT id FROM catalog_products WHERE LOWER(name) = LOWER(?) AND LOWER(brand) = LOWER(?) AND LOWER(COALESCE(category, '')) = LOWER(?)`).bind(nome, marca, categoria).first<{ id: string }>();
+      group = existing?.id ?? crypto.randomUUID();
+      if (!existing) await db.prepare(`INSERT INTO catalog_products (id, name, brand, category, base_price, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`).bind(group, nome, marca, categoria, prezzo, now).run();
+      groupCache.set(key, group);
+    }
+    const result = await db.prepare(`INSERT INTO products (sku, name, brand, category, color, size, price, variant_group, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`).bind(sku, nome, marca, categoria, colore, taglia, prezzo, group).run();
+    const productId = result.meta?.last_row_id;
+    if (!productId) { skipped.push({ sku, reason: "errore inserimento" }); continue; }
+    for (const ean of eans) await db.prepare(`INSERT OR IGNORE INTO product_eans (product_id, ean) VALUES (?, ?)`).bind(productId, ean).run();
+    await db.prepare(`INSERT INTO inventory (product_id, store, quantity, reserved, reorder_level) VALUES (?, 'Viterbo', ?, 0, 2)`).bind(productId, vt).run();
+    await db.prepare(`INSERT INTO inventory (product_id, store, quantity, reserved, reorder_level) VALUES (?, 'Gran Sasso', ?, 0, 2)`).bind(productId, gs).run();
+    created += 1;
+  }
+  await logActivity({ user, action: "import", entity: "product", detail: `Import CSV: ${created} varianti create, ${skipped.length} saltate` });
+  return json({ ok: true, created, skipped });
+}
+
 async function updateGift(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const giftId = Math.round(numberValue(body.id));
@@ -1065,6 +1107,7 @@ async function postImpl(request: Request) {
     if (action === "updateProduct") return updateProduct(auth.user, body);
     if (action === "setStock") return setStock(auth.user, body);
     if (action === "deleteProduct") return deleteProduct(auth.user, body);
+    if (action === "importProducts") return importProducts(auth.user, body);
     if (action === "updateGift") return updateGift(auth.user, body);
     if (action === "deleteGift") return deleteGift(auth.user, body);
     if (action === "updateReservation") return updateReservation(auth.user, body);

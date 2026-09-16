@@ -44,6 +44,6 @@ export async function POST(request: Request) {
   const user = await applicationUserForEmail(identity.email);
   if (!user) return json({ error: "Profilo gestionale non autorizzato per questa email." }, 403);
 
-  const session = await createSession(user.id, 55 * 60);
+  const session = await createSession(user.id, 12 * 60 * 60);
   return json({ user }, 200, { "Set-Cookie": session.cookie });
 }

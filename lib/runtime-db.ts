@@ -225,7 +225,7 @@ export async function currentUser(request: Request): Promise<SessionUser | null>
   return row ?? null;
 }
 
-export async function createSession(userId: number, maxAgeSeconds = 55 * 60) {
+export async function createSession(userId: number, maxAgeSeconds = 12 * 60 * 60) {
   const token = randomToken(32);
   const tokenHash = await hashToken(token);
   const now = new Date();
