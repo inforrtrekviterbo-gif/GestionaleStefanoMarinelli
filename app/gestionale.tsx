@@ -506,38 +506,9 @@ function Metric({ label, value, note }: { label: string; value: string; note?: s
 type ReportSale = Pick<Sale, "store" | "total" | "cashAmount" | "cardAmount" | "bankAmount" | "giftAmount" | "createdAt">;
 const reportStores: Store[] = ["Viterbo", "Gran Sasso"];
 
-function demoReportSales(): ReportSale[] {
-  const samples: Array<[number, Store, number, number, number, number, number]> = [
-    [0, "Viterbo", 1248, 418, 710, 120, 0],
-    [0, "Gran Sasso", 986, 286, 640, 0, 60],
-    [1, "Viterbo", 1095, 365, 650, 80, 0],
-    [1, "Gran Sasso", 1170, 410, 700, 60, 0],
-    [2, "Viterbo", 875, 250, 585, 0, 40],
-    [2, "Gran Sasso", 742, 192, 490, 60, 0],
-    [4, "Viterbo", 1380, 480, 780, 120, 0],
-    [4, "Gran Sasso", 920, 260, 600, 0, 60],
-    [7, "Viterbo", -85, -85, 0, 0, 0],
-    [10, "Gran Sasso", 1540, 440, 950, 150, 0],
-    [34, "Viterbo", 2180, 680, 1300, 200, 0],
-    [41, "Gran Sasso", 1940, 590, 1200, 100, 50],
-    [370, "Viterbo", 3260, 1060, 1900, 300, 0],
-    [370, "Gran Sasso", 2840, 840, 1800, 150, 50],
-    [410, "Viterbo", 2980, 980, 1750, 200, 50],
-    [410, "Gran Sasso", 3120, 920, 2050, 150, 0],
-  ];
-  return samples.map(([daysAgo, store, total, cash, card, bank, gift]) => {
-    const date = new Date();
-    date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() - daysAgo);
-    return { store, total, cashAmount: cash, cardAmount: card, bankAmount: bank, giftAmount: gift, createdAt: date.toISOString() };
-  });
-}
-
 function CashReports({ data }: { data: Bootstrap }) {
   const [mode, setMode] = useState<"daily" | "monthly">("daily");
-  const [demoMode, setDemoMode] = useState(true);
-  const demoSales = useMemo(() => demoReportSales(), []);
-  const sales: ReportSale[] = demoMode ? demoSales : data.sales;
+  const sales: ReportSale[] = data.sales;
   const totalFor = (store?: Store) => sales.filter((sale) => !store || sale.store === store).reduce((sum, sale) => sum + sale.total, 0);
   const grandTotal = totalFor();
   const storeTotals = { Viterbo: totalFor("Viterbo"), "Gran Sasso": totalFor("Gran Sasso") };
@@ -602,10 +573,8 @@ function CashReports({ data }: { data: Bootstrap }) {
       <div><p className="eyebrow">CORRISPETTIVI · ENTRAMBI I NEGOZI</p><h1>Quanto stanno facendo i negozi</h1><p className="muted inventory-intro">Incassi, pagamenti e confronto tra Viterbo e Gran Sasso in una sola schermata.</p></div>
       <div className="head-controls report-controls">
         <label className="field inline"><span>Raggruppamento</span><select value={mode} onChange={(event) => setMode(event.target.value as "daily" | "monthly")}><option value="daily">Giornaliero</option><option value="monthly">Mensile</option></select></label>
-        <button className={`secondary demo-toggle ${demoMode ? "active" : ""}`} onClick={() => setDemoMode((value) => !value)}><MaterialIcon>{demoMode ? "science" : "database"}</MaterialIcon>{demoMode ? "Dati di prova attivi" : "Mostra dati di prova"}</button>
       </div>
     </div>
-    {demoMode && <div className="report-demo-notice"><MaterialIcon>info</MaterialIcon><span><strong>Anteprima con dati di prova</strong> Questi valori servono solo a mostrare la sezione e non vengono salvati.</span></div>}
     <div className="report-kpis">
       <article className="report-kpi primary-kpi"><MaterialIcon>payments</MaterialIcon><span><small>Totale complessivo</small><strong>{money(grandTotal)}</strong><em>{movementCount} movimenti</em></span></article>
       <article className="report-kpi"><MaterialIcon>storefront</MaterialIcon><span><small>Viterbo</small><strong>{money(storeTotals.Viterbo)}</strong><em>{grandTotal ? (storeTotals.Viterbo / grandTotal * 100).toFixed(1) : "0"}% del totale</em></span></article>

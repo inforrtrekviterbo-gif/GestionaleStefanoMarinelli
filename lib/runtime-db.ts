@@ -117,32 +117,6 @@ export async function hashToken(token: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function seedProducts() {
-  const db = database();
-  const rows = [
-    ["SCARP-TRK-BLU-42", "Scarpa Trekking Alta", "Calzature", "Blu", "42", 129.9, ["8051000000013", "8051000000112"]],
-    ["SCARP-TRK-BLU-43", "Scarpa Trekking Alta", "Calzature", "Blu", "43", 129.9, ["8051000000020"]],
-    ["SCARP-TRK-NER-42", "Scarpa Trekking Alta", "Calzature", "Nero", "42", 129.9, ["8051000000037"]],
-    ["MAG-GS-BLU-M", "Maglia Gran Sasso", "Abbigliamento", "Blu", "M", 39.9, ["8051000000044"]],
-    ["MAG-GS-VER-L", "Maglia Gran Sasso", "Abbigliamento", "Verde", "L", 39.9, ["8051000000051"]],
-    ["ZAINO-TRAIL-30", "Zaino Trail 30L", "Attrezzatura", "Rosso", "Unica", 89, ["8051000000068", "8051000000167"]],
-  ] as const;
-
-  for (const row of rows) {
-    await db.prepare(`INSERT OR IGNORE INTO products (sku, name, category, color, size, price, active) VALUES (?, ?, ?, ?, ?, ?, 1)`)
-      .bind(row[0], row[1], row[2], row[3], row[4], row[5]).run();
-    const product = await db.prepare(`SELECT id FROM products WHERE sku = ?`).bind(row[0]).first<{ id: number }>();
-    if (!product) continue;
-    for (const ean of row[6]) {
-      await db.prepare(`INSERT OR IGNORE INTO product_eans (product_id, ean) VALUES (?, ?)`).bind(product.id, ean).run();
-    }
-    await db.prepare(`INSERT OR IGNORE INTO inventory (product_id, store, quantity, reserved) VALUES (?, 'Viterbo', 6, 0)`).bind(product.id).run();
-    await db.prepare(`INSERT OR IGNORE INTO inventory (product_id, store, quantity, reserved) VALUES (?, 'Gran Sasso', 4, 0)`).bind(product.id).run();
-  }
-}
-
-// Catalogo demo ricco, solo in sviluppo (pglite): serve a vedere magazzino,
-// dashboard e "articoli da riordinare" pieni. Alcuni con giacenza bassa.
 export async function seedDemoProducts() {
   const db = database();
   let ean = 8052000000000;
@@ -201,8 +175,12 @@ export async function ensureDatabase() {
   await db.prepare(`UPDATE users SET display_name = 'Cassa Gran Sasso', role = 'gran_sasso', store = 'Gran Sasso', must_change_password = 0 WHERE username = 'gran-sasso'`).run();
   const seeded = await db.prepare(`SELECT value FROM app_settings WHERE key = 'initial_seed_completed'`).first<{ value: string }>();
   if (!seeded) {
-    const products = await db.prepare(`SELECT COUNT(*) AS count FROM products`).first<{ count: number }>();
-    if (!products?.count) await (isDevDb() ? seedDemoProducts() : seedProducts());
+    // Dati di esempio SOLO in sviluppo locale (pglite). In produzione gli account
+    // reali partono vuoti: nessun dato di prova.
+    if (isDevDb()) {
+      const products = await db.prepare(`SELECT COUNT(*) AS count FROM products`).first<{ count: number }>();
+      if (!products?.count) await seedDemoProducts();
+    }
     await db.prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('initial_seed_completed', '1')`).run();
   }
   await db.prepare(`UPDATE products SET variant_group = 'legacy-' || (
