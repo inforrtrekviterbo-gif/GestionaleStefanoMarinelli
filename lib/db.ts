@@ -17,6 +17,21 @@
  * Cosi' `lib/runtime-db.ts` e le api route continuano a funzionare invariate.
  */
 import postgres from "postgres";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+// Scope per-richiesta: se sandbox=true le query vanno sullo schema `sandbox`
+// (dati finti isolati dell'account test); altrimenti sullo schema reale.
+export const dbScope = new AsyncLocalStorage<{ sandbox: boolean }>();
+export function withDbScope<T>(fn: () => Promise<T>): Promise<T> {
+  return dbScope.run({ sandbox: false }, fn);
+}
+export function useSandbox() {
+  const store = dbScope.getStore();
+  if (store) store.sandbox = true;
+}
+function inSandbox(): boolean {
+  return dbScope.getStore()?.sandbox === true;
+}
 
 /**
  * Due backend:
@@ -35,12 +50,18 @@ export function isDevDb(): boolean {
   return !process.env.DATABASE_URL;
 }
 
-let backendPromise: Promise<Backend> | null = null;
+let mainPromise: Promise<Backend> | null = null;
+let sandboxPromise: Promise<Backend> | null = null;
 
-async function createBackend(): Promise<Backend> {
+async function createBackend(mode: "main" | "sandbox"): Promise<Backend> {
   const url = process.env.DATABASE_URL;
   if (url) {
-    const sql = postgres(url, { prepare: false, types: {}, max: 5, idle_timeout: 20 });
+    // Sandbox: pooler in session-mode (5432) con search_path sandbox,public
+    // (le tabelle dati stanno in sandbox; users/sessions/app_settings solo in public).
+    const connUrl = mode === "sandbox" ? url.replace(":6543", ":5432") : url;
+    const options: Record<string, unknown> = { prepare: false, types: {}, max: mode === "sandbox" ? 3 : 5, idle_timeout: 20 };
+    if (mode === "sandbox") options.connection = { search_path: "sandbox, public" };
+    const sql = postgres(connUrl, options);
     const wrap = (executor: ReturnType<typeof postgres>): Backend => ({
       async query(text, params) {
         const result = await executor.unsafe(text, params as never[]);
@@ -71,8 +92,12 @@ async function createBackend(): Promise<Backend> {
 }
 
 function getBackend(): Promise<Backend> {
-  if (!backendPromise) backendPromise = createBackend();
-  return backendPromise;
+  if (inSandbox() && process.env.DATABASE_URL) {
+    if (!sandboxPromise) sandboxPromise = createBackend("sandbox");
+    return sandboxPromise;
+  }
+  if (!mainPromise) mainPromise = createBackend("main");
+  return mainPromise;
 }
 
 // Tabelle senza colonna `id` autoincrementale: niente RETURNING id.

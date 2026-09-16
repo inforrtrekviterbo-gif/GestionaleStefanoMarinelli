@@ -1,4 +1,5 @@
 import { database, ensureDatabase, hashToken, isTestMode, json, type Store } from "../../../lib/runtime-db";
+import { withDbScope } from "../../../lib/db";
 
 type Device = {
   id: number;
@@ -42,7 +43,7 @@ async function heartbeat(device: Device, status = "online", error = "") {
   await database().prepare(`UPDATE fiscal_devices SET last_seen_at = ?, last_status = ?, last_error = ?, updated_at = ? WHERE id = ?`).bind(now, status, error || null, now, device.id).run();
 }
 
-export async function GET(request: Request) {
+async function getImpl(request: Request) {
   await ensureDatabase();
   const url = new URL(request.url);
   const store = storeValue(url.searchParams.get("store"));
@@ -75,7 +76,7 @@ export async function GET(request: Request) {
   });
 }
 
-export async function POST(request: Request) {
+async function postImpl(request: Request) {
   await ensureDatabase();
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const store = storeValue(body.store);
@@ -133,3 +134,6 @@ export async function POST(request: Request) {
   }
   return json({ error: "Azione non disponibile." }, 404);
 }
+
+export const GET = (request: Request) => withDbScope(() => getImpl(request));
+export const POST = (request: Request) => withDbScope(() => postImpl(request));

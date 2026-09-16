@@ -1,4 +1,5 @@
 import { createPdf, euro } from "../../../lib/pdf";
+import { withDbScope } from "../../../lib/db";
 import { currentUser, database, ensureDatabase, json } from "../../../lib/runtime-db";
 
 async function all<T>(sql: string, ...bindings: unknown[]) {
@@ -17,7 +18,7 @@ function pdfResponse(bytes: Uint8Array, filename: string) {
   });
 }
 
-export async function GET(request: Request) {
+async function getImpl(request: Request) {
   await ensureDatabase();
   const user = await currentUser(request);
   if (!user || user.mustChangePassword) return json({ error: "Sessione scaduta o cambio password obbligatorio." }, 401);
@@ -116,3 +117,5 @@ export async function GET(request: Request) {
   }
   return json({ error: "Tipo di documento non disponibile." }, 404);
 }
+
+export const GET = (request: Request) => withDbScope(() => getImpl(request));

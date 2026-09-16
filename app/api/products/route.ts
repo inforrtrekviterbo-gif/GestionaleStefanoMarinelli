@@ -1,4 +1,5 @@
 import { currentUser, database, ensureDatabase, isTestMode, json, logActivity } from "../../../lib/runtime-db";
+import { withDbScope } from "../../../lib/db";
 import { getBucket } from "../../../lib/storage";
 
 type R2ObjectBodyLike = {
@@ -74,7 +75,7 @@ async function requireUser(request: Request) {
   return user && !user.mustChangePassword ? user : null;
 }
 
-export async function GET(request: Request) {
+async function getImpl(request: Request) {
   await ensureDatabase();
   const user = await requireUser(request);
   if (!user) return json({ error: "Sessione scaduta." }, 401);
@@ -92,7 +93,7 @@ export async function GET(request: Request) {
   return new Response(object.body, { headers });
 }
 
-export async function POST(request: Request) {
+async function postImpl(request: Request) {
   await ensureDatabase();
   const user = await requireUser(request);
   if (!user) return json({ error: "Sessione scaduta." }, 401);
@@ -188,3 +189,6 @@ export async function POST(request: Request) {
   await logActivity({ user, action: existingGroup ? "variant" : "create", entity: "product", entityId: createdIds[0] ?? null, detail: `${brand} ${name} · ${createdIds.length} ${createdIds.length === 1 ? "variante" : "varianti"}` });
   return json({ ok: true, productId: variantGroup, productCount: 1, variantCount: createdIds.length, photos: photoKeys.size });
 }
+
+export const GET = (request: Request) => withDbScope(() => getImpl(request));
+export const POST = (request: Request) => withDbScope(() => postImpl(request));

@@ -1,5 +1,6 @@
 import { currentUser, database, ean13, ensureDatabase, hashToken, idCode, isTestMode, json, logActivity, type SessionUser, type Store } from "../../../lib/runtime-db";
 import { getBucket } from "../../../lib/storage";
+import { withDbScope } from "../../../lib/db";
 
 type JsonMap = Record<string, unknown>;
 type CartItem = {
@@ -192,7 +193,7 @@ async function bootstrap(user: SessionUser) {
   return { user, products, customers, sales, gifts, reservations, transfers, documents, saleItems, fiscalDevices, fiscalJobs, generatedAt: new Date().toISOString() };
 }
 
-export async function GET(request: Request) {
+async function getImpl(request: Request) {
   await ensureDatabase();
   const auth = await requireUser(request);
   if (auth.response || !auth.user) return auth.response;
@@ -1042,7 +1043,7 @@ async function resetData(user: SessionUser, body: JsonMap) {
   return json({ ok: true });
 }
 
-export async function POST(request: Request) {
+async function postImpl(request: Request) {
   await ensureDatabase();
   const auth = await requireUser(request);
   if (auth.response || !auth.user) return auth.response;
@@ -1081,3 +1082,6 @@ export async function POST(request: Request) {
     return json({ error: message.includes("UNIQUE") ? "Dato già presente: controlla codice, SKU o EAN." : message }, 400);
   }
 }
+
+export const GET = (request: Request) => withDbScope(() => getImpl(request));
+export const POST = (request: Request) => withDbScope(() => postImpl(request));
