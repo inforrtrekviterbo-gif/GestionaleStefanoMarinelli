@@ -351,11 +351,47 @@ function NewProductForm({ data, reload, onCreated }: { data: Bootstrap; reload: 
     reader.onload = () => setV(key, { photo: file, photoPreview: String(reader.result ?? "") });
     reader.readAsDataURL(file);
   }
+  const qNum = (value: string) => Math.max(0, Math.round(Number(value) || 0));
   async function create(event: React.FormEvent) {
     event.preventDefault(); setError(""); setSaving(true);
     try {
       if (isClientTestMode()) throw new Error("Modalità TEST attiva: prodotto non salvato (nessuna scrittura).");
       const createdName = form.name;
+      const norm = (value: string) => (value || "").trim().toLocaleLowerCase("it");
+      // Riconoscimento automatico: prodotto con stesso nome+marca+categoria già presente?
+      const groupMatch = data.products.find((product) => norm(product.name) === norm(form.name) && norm(product.brand) === norm(form.brand) && norm(product.category) === norm(form.category));
+      const existingGroup = groupMatch?.variantGroup?.trim() || null;
+      if (groupMatch && existingGroup) {
+        const groupItems = data.products.filter((product) => product.variantGroup === existingGroup);
+        const restock: { v: VariantDraft; twin: Product }[] = [];
+        const fresh: VariantDraft[] = [];
+        for (const v of variants) {
+          const twin = groupItems.find((product) => norm(product.color) === norm(v.color) && norm(product.size) === norm(v.size));
+          if (twin) restock.push({ v, twin }); else fresh.push(v);
+        }
+        const restockLines = restock.map(({ v, twin }) => `• ${twin.color} · ${twin.size}:  VT ${twin.viterboQty}+${qNum(v.viterboQty)},  GS ${twin.granSassoQty}+${qNum(v.granSassoQty)}`);
+        const freshLines = fresh.map((v) => `• nuova variante ${v.color || "?"} · ${v.size || "?"}`);
+        const message = `Esiste già "${groupMatch.name}" (${groupMatch.brand} · ${groupMatch.category}).\n\n`
+          + (restock.length ? `Stessa combinazione già a magazzino → aumento la giacenza:\n${restockLines.join("\n")}\n\n` : "")
+          + (fresh.length ? `Aggiungo a questo prodotto come nuova/e variante/i:\n${freshLines.join("\n")}\n\n` : "")
+          + "Confermi?";
+        if (!confirm(message)) { setSaving(false); return; }
+        for (const { v, twin } of restock) {
+          if (showVt && qNum(v.viterboQty) > 0) await post("setStock", { id: twin.id, store: "Viterbo", quantity: twin.viterboQty + qNum(v.viterboQty) });
+          if (showGs && qNum(v.granSassoQty) > 0) await post("setStock", { id: twin.id, store: "Gran Sasso", quantity: twin.granSassoQty + qNum(v.granSassoQty) });
+        }
+        if (fresh.length) {
+          const body = new FormData();
+          body.append("payload", JSON.stringify({ variantGroup: existingGroup, variants: fresh.map(({ sku, color, size, eans, viterboQty, granSassoQty }) => ({ sku, color, size, eans: eans.split(",").map((value) => value.trim()).filter(Boolean), viterboQty, granSassoQty, viterboReorderLevel: "2", granSassoReorderLevel: "2" })) }));
+          fresh.forEach((variant, index) => { if (variant.photo) body.append(`photo-${index}`, variant.photo); });
+          await readJson(await fetch("/api/products", { method: "POST", body }));
+        }
+        setForm({ name: "", brand: "", category: "", price: "" }); setVariants([emptyVariant()]);
+        await reload();
+        if (onCreated) onCreated();
+        else setError(`"${createdName}": ${restock.length} giacenz${restock.length === 1 ? "a aggiornata" : "e aggiornate"}, ${fresh.length} variant${fresh.length === 1 ? "e aggiunta" : "i aggiunte"}.`);
+        return;
+      }
       const body = new FormData();
       body.append("payload", JSON.stringify({ ...form, variants: variants.map(({ sku, color, size, eans, viterboQty, granSassoQty }) => ({ sku, color, size, eans: eans.split(",").map((value) => value.trim()).filter(Boolean), viterboQty, granSassoQty, viterboReorderLevel: "2", granSassoReorderLevel: "2" })) }));
       variants.forEach((variant, index) => { if (variant.photo) body.append(`photo-${index}`, variant.photo); });
