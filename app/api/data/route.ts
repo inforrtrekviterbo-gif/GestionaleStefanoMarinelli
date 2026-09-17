@@ -190,7 +190,9 @@ async function bootstrap(user: SessionUser) {
   const allFiscalJobs = await all<{ store: string } & Record<string, unknown>>(`SELECT fj.id, fj.sale_id AS saleId, fj.store, fj.job_type AS jobType, fj.status, fj.attempts, fj.device_response AS deviceResponse, fj.created_at AS createdAt, fj.claimed_at AS claimedAt, fj.completed_at AS completedAt, s.receipt_no AS receiptNo FROM fiscal_jobs fj JOIN sales s ON s.id = fj.sale_id ORDER BY fj.created_at DESC LIMIT 100`);
   const fiscalDevices = user.role === "admin" ? allFiscalDevices : allFiscalDevices.filter((device) => device.store === user.store);
   const fiscalJobs = user.role === "admin" ? allFiscalJobs : allFiscalJobs.filter((job) => job.store === user.store);
-  return { user, products, customers, sales, gifts, reservations, transfers, documents, saleItems, fiscalDevices, fiscalJobs, generatedAt: new Date().toISOString() };
+  const services = await all<{ id: number; name: string; price: number; active: number }>(
+    `SELECT id, name, price, active FROM services WHERE active = 1 ORDER BY name`);
+  return { user, products, customers, sales, gifts, reservations, transfers, documents, saleItems, fiscalDevices, fiscalJobs, services, generatedAt: new Date().toISOString() };
 }
 
 async function getImpl(request: Request) {
@@ -307,8 +309,12 @@ async function createCustomer(user: SessionUser, body: JsonMap) {
   if (!firstName || !lastName) return json({ error: "Nome e cognome sono obbligatori." }, 400);
   const result = await database().prepare(`INSERT INTO customers (customer_type, first_name, last_name, company_name, vat_number, pec, sdi_code, phone, email, address, postal_code, city, province, tax_code, scope, created_store, created_at) VALUES ('private', ?, ?, '', '', '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(firstName, lastName, stringValue(body.phone), stringValue(body.email), stringValue(body.address), stringValue(body.postalCode), stringValue(body.city), stringValue(body.province), stringValue(body.taxCode), store, store, new Date().toISOString()).run();
-  await logActivity({ user, action: "create", entity: "customer", entityId: Number(result.meta?.last_row_id), detail: `${firstName} ${lastName}`, store });
-  return json({ ok: true, id: result.meta?.last_row_id });
+  const lastId = Number(result.meta?.last_row_id);
+  await logActivity({ user, action: "create", entity: "customer", entityId: lastId, detail: `${firstName} ${lastName}`, store });
+  const created = await database().prepare(
+    `SELECT id, customer_type AS customerType, first_name AS firstName, last_name AS lastName, company_name AS companyName, vat_number AS vatNumber, pec, sdi_code AS sdiCode, phone, email, address, postal_code AS postalCode, city, province, tax_code AS taxCode, scope, created_store AS createdStore, created_at AS createdAt FROM customers WHERE id = ?`
+  ).bind(lastId).first();
+  return json({ ok: true, id: lastId, customer: created });
 }
 
 function adminOnly(user: SessionUser) {
@@ -333,6 +339,39 @@ async function deleteCustomer(user: SessionUser, body: JsonMap) {
   const result = await database().prepare(`UPDATE customers SET active = 0 WHERE id = ? AND active = 1`).bind(customerId).run();
   if (!result.meta?.changes) return json({ error: "Cliente non trovato." }, 404);
   await logActivity({ user, action: "delete", entity: "customer", entityId: customerId });
+  return json({ ok: true });
+}
+
+async function createService(user: SessionUser, body: JsonMap) {
+  if (user.role !== "admin") return json({ error: "Solo l'amministratore può gestire i servizi." }, 403);
+  const name = String(body.name ?? "").trim();
+  const price = Math.max(0, Number(body.price) || 0);
+  if (!name) return json({ error: "Nome servizio obbligatorio." }, 400);
+  await database().prepare(`INSERT INTO services (name, price, active, created_at) VALUES (?, ?, 1, ?)`)
+    .bind(name, price, new Date().toISOString()).run();
+  await logActivity({ user, action: "createService", entity: "service", detail: `Servizio creato: ${name}` });
+  return json({ ok: true });
+}
+
+async function updateService(user: SessionUser, body: JsonMap) {
+  if (user.role !== "admin") return json({ error: "Solo l'amministratore può gestire i servizi." }, 403);
+  const id = Number(body.id);
+  const name = String(body.name ?? "").trim();
+  const price = Math.max(0, Number(body.price) || 0);
+  const active = body.active === false || body.active === 0 ? 0 : 1;
+  if (!id || !name) return json({ error: "Dati servizio non validi." }, 400);
+  await database().prepare(`UPDATE services SET name = ?, price = ?, active = ? WHERE id = ?`)
+    .bind(name, price, active, id).run();
+  await logActivity({ user, action: "updateService", entity: "service", entityId: id, detail: `Servizio aggiornato: ${name}` });
+  return json({ ok: true });
+}
+
+async function deleteService(user: SessionUser, body: JsonMap) {
+  if (user.role !== "admin") return json({ error: "Solo l'amministratore può gestire i servizi." }, 403);
+  const id = Number(body.id);
+  if (!id) return json({ error: "Servizio non valido." }, 400);
+  await database().prepare(`DELETE FROM services WHERE id = ?`).bind(id).run();
+  await logActivity({ user, action: "deleteService", entity: "service", entityId: id, detail: `Servizio eliminato #${id}` });
   return json({ ok: true });
 }
 
@@ -1111,6 +1150,9 @@ async function postImpl(request: Request) {
     if (action === "createCustomer") return createCustomer(auth.user, body);
     if (action === "updateCustomer") return updateCustomer(auth.user, body);
     if (action === "deleteCustomer") return deleteCustomer(auth.user, body);
+    if (action === "createService") return createService(auth.user, body);
+    if (action === "updateService") return updateService(auth.user, body);
+    if (action === "deleteService") return deleteService(auth.user, body);
     if (action === "createSale") return createSale(auth.user, body);
     if (action === "createTransfer") return createTransfer(auth.user, body);
     if (action === "completeTransfer") return completeTransfer(auth.user, body);
