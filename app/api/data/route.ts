@@ -458,6 +458,28 @@ async function importProducts(user: SessionUser, body: JsonMap) {
   return json({ ok: true, created, skipped });
 }
 
+async function importCustomers(user: SessionUser, body: JsonMap) {
+  const denied = adminOnly(user); if (denied) return denied;
+  const rows = Array.isArray(body.rows) ? (body.rows as JsonMap[]) : [];
+  if (!rows.length) return json({ error: "Nessuna riga da importare." }, 400);
+  if (rows.length > 5000) return json({ error: "Massimo 5000 righe per import." }, 400);
+  const store = user.role === "admin" ? "Viterbo" : (user.store ?? "Viterbo");
+  const now = new Date().toISOString();
+  let created = 0;
+  const skipped: { name: string; reason: string }[] = [];
+  for (const raw of rows) {
+    const firstName = stringValue(raw.firstName), lastName = stringValue(raw.lastName), phone = stringValue(raw.phone);
+    if (!firstName || !lastName) { skipped.push({ name: `${lastName} ${firstName}`.trim() || "(riga vuota)", reason: "nome/cognome mancante" }); continue; }
+    const dup = await database().prepare(`SELECT id FROM customers WHERE active = 1 AND LOWER(first_name) = LOWER(?) AND LOWER(last_name) = LOWER(?) AND phone = ?`).bind(firstName, lastName, phone).first();
+    if (dup) { skipped.push({ name: `${lastName} ${firstName}`, reason: "già presente" }); continue; }
+    await database().prepare(`INSERT INTO customers (customer_type, first_name, last_name, company_name, vat_number, pec, sdi_code, phone, email, address, postal_code, city, province, tax_code, scope, created_store, created_at) VALUES ('private', ?, ?, '', '', '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(firstName, lastName, phone, stringValue(raw.email), stringValue(raw.address), stringValue(raw.postalCode), stringValue(raw.city), stringValue(raw.province), stringValue(raw.taxCode), store, store, now).run();
+    created += 1;
+  }
+  await logActivity({ user, action: "import", entity: "customer", detail: `Import clienti: ${created} creati, ${skipped.length} saltati` });
+  return json({ ok: true, created, skipped });
+}
+
 async function updateGift(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const giftId = Math.round(numberValue(body.id));
@@ -1101,6 +1123,7 @@ async function postImpl(request: Request) {
     if (action === "setStock") return setStock(auth.user, body);
     if (action === "deleteProduct") return deleteProduct(auth.user, body);
     if (action === "importProducts") return importProducts(auth.user, body);
+    if (action === "importCustomers") return importCustomers(auth.user, body);
     if (action === "updateGift") return updateGift(auth.user, body);
     if (action === "deleteGift") return deleteGift(auth.user, body);
     if (action === "updateReservation") return updateReservation(auth.user, body);
