@@ -302,15 +302,12 @@ async function getImpl(request: Request) {
 async function createCustomer(user: SessionUser, body: JsonMap) {
   const requestedStore = validStore(body.store) ? body.store : "Viterbo";
   const store = user.role === "admin" ? requestedStore : user.store ?? requestedStore;
-  const customerType = stringValue(body.customerType) === "company" ? "company" : "private";
   const firstName = stringValue(body.firstName);
   const lastName = stringValue(body.lastName);
-  const companyName = stringValue(body.companyName);
-  const vatNumber = stringValue(body.vatNumber);
-  if (customerType === "private" && (!firstName || !lastName)) return json({ error: "Nome e cognome sono obbligatori per un privato." }, 400);
-  if (customerType === "company" && (!companyName || !vatNumber)) return json({ error: "Ragione sociale e partita IVA sono obbligatorie per un'azienda." }, 400);
-  const result = await database().prepare(`INSERT INTO customers (customer_type, first_name, last_name, company_name, vat_number, pec, sdi_code, phone, email, address, postal_code, city, province, tax_code, scope, created_store, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(customerType, firstName, lastName, companyName, vatNumber, stringValue(body.pec), stringValue(body.sdiCode), stringValue(body.phone), stringValue(body.email), stringValue(body.address), stringValue(body.postalCode), stringValue(body.city), stringValue(body.province), stringValue(body.taxCode), store, store, new Date().toISOString()).run();
+  if (!firstName || !lastName) return json({ error: "Nome e cognome sono obbligatori." }, 400);
+  const result = await database().prepare(`INSERT INTO customers (customer_type, first_name, last_name, company_name, vat_number, pec, sdi_code, phone, email, address, postal_code, city, province, tax_code, scope, created_store, created_at) VALUES ('private', ?, ?, '', '', '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(firstName, lastName, stringValue(body.phone), stringValue(body.email), stringValue(body.address), stringValue(body.postalCode), stringValue(body.city), stringValue(body.province), stringValue(body.taxCode), store, store, new Date().toISOString()).run();
+  await logActivity({ user, action: "create", entity: "customer", entityId: Number(result.meta?.last_row_id), detail: `${firstName} ${lastName}`, store });
   return json({ ok: true, id: result.meta?.last_row_id });
 }
 
@@ -321,15 +318,11 @@ function adminOnly(user: SessionUser) {
 async function updateCustomer(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const customerId = Math.round(numberValue(body.id));
-  const customerType = stringValue(body.customerType) === "company" ? "company" : "private";
   const firstName = stringValue(body.firstName);
   const lastName = stringValue(body.lastName);
-  const companyName = stringValue(body.companyName);
-  const vatNumber = stringValue(body.vatNumber);
-  if (customerType === "private" && (!firstName || !lastName)) return json({ error: "Nome e cognome sono obbligatori per un privato." }, 400);
-  if (customerType === "company" && (!companyName || !vatNumber)) return json({ error: "Ragione sociale e partita IVA sono obbligatorie per un'azienda." }, 400);
-  const result = await database().prepare(`UPDATE customers SET customer_type = ?, first_name = ?, last_name = ?, company_name = ?, vat_number = ?, pec = ?, sdi_code = ?, phone = ?, email = ?, address = ?, postal_code = ?, city = ?, province = ?, tax_code = ? WHERE id = ? AND active = 1`)
-    .bind(customerType, firstName, lastName, companyName, vatNumber, stringValue(body.pec), stringValue(body.sdiCode), stringValue(body.phone), stringValue(body.email), stringValue(body.address), stringValue(body.postalCode), stringValue(body.city), stringValue(body.province), stringValue(body.taxCode), customerId).run();
+  if (!firstName || !lastName) return json({ error: "Nome e cognome sono obbligatori." }, 400);
+  const result = await database().prepare(`UPDATE customers SET first_name = ?, last_name = ?, phone = ?, email = ?, address = ?, postal_code = ?, city = ?, province = ?, tax_code = ? WHERE id = ? AND active = 1`)
+    .bind(firstName, lastName, stringValue(body.phone), stringValue(body.email), stringValue(body.address), stringValue(body.postalCode), stringValue(body.city), stringValue(body.province), stringValue(body.taxCode), customerId).run();
   if (!result.meta?.changes) return json({ error: "Cliente non trovato." }, 404);
   return json({ ok: true });
 }
