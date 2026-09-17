@@ -247,6 +247,7 @@ function Modal({ title, onClose, children, guard = true }: { title: string; onCl
   const [dirty, setDirty] = useState(false);
   const attemptClose = () => { if (guard && dirty && !confirm("Ci sono modifiche non salvate. Chiudere senza salvare?")) return; onClose(); };
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") attemptClose(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); });
+  useEffect(() => { const prev = document.body.style.overflow; document.body.style.overflow = "hidden"; return () => { document.body.style.overflow = prev; }; }, []);
   const markDirty = guard ? () => setDirty(true) : undefined;
   return <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={attemptClose}><div className="modal" onClick={(event) => event.stopPropagation()} onInput={markDirty} onChange={markDirty}><div className="modal-head"><h2>{title}</h2><button className="icon-button" onClick={attemptClose}><MaterialIcon>close</MaterialIcon></button></div>{children}</div></div>;
 }
