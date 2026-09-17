@@ -45,7 +45,7 @@ $script:FormaChiave = '^msrt_[A-Za-z0-9_-]{20,}$'
 # Valori di partenza, gli stessi di config-viterbo.example.json.
 # Durante l'installazione finiscono in config.json insieme alla chiave.
 $script:ConfigurazioneDiPartenza = [ordered]@{
-  ApiBaseUrl                       = "https://gestionale-marinelli-stefano.stefano-mari-4575.chatgpt.site"
+  ApiBaseUrl                       = "https://gestionale-stefano-marinelli.vercel.app"
   Store                            = "Viterbo"
   DeviceToken                      = ""
   Adapter                          = "rch_standard_tcp"

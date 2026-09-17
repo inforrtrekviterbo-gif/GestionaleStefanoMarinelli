@@ -1,5 +1,5 @@
 {
-  "ApiBaseUrl": "https://gestionale-marinelli-stefano.stefano-mari-4575.chatgpt.site",
+  "ApiBaseUrl": "https://gestionale-stefano-marinelli.vercel.app",
   "Store": "Viterbo",
   "DeviceToken": "INCOLLA_QUI_LA_CHIAVE_GENERATA_DAL_GESTIONALE",
   "Adapter": "rch_standard_tcp",
