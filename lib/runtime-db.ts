@@ -140,10 +140,13 @@ export async function seedDemoProducts() {
     ["Guanti Impermeabili", "Accessori", "Reusch", 34.9, [["Nero", "M", 4, 3], ["Nero", "L", 1, 1], ["Grigio", "XL", 0, 0]]],
   ];
   for (const [name, category, brand, price, variants] of catalog) {
+    const variantGroup = `demo-${`${brand}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    await db.prepare(`INSERT OR IGNORE INTO catalog_products (id, name, brand, category, base_price, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`)
+      .bind(variantGroup, name, brand, category, price, new Date().toISOString()).run();
     for (const [color, size, vt, gs] of variants) {
       const sku = `${name.split(" ").map((w) => w.slice(0, 3)).join("").toUpperCase()}-${color.slice(0, 3).toUpperCase()}-${size}`.replace(/[^A-Z0-9-]/g, "");
-      await db.prepare(`INSERT OR IGNORE INTO products (sku, name, brand, category, color, size, price, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`)
-        .bind(sku, name, brand, category, color, size, price).run();
+      await db.prepare(`INSERT OR IGNORE INTO products (sku, name, brand, category, color, size, price, variant_group, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+        .bind(sku, name, brand, category, color, size, price, variantGroup).run();
       const product = await db.prepare(`SELECT id FROM products WHERE sku = ?`).bind(sku).first<{ id: number }>();
       if (!product) continue;
       await db.prepare(`INSERT OR IGNORE INTO product_eans (product_id, ean) VALUES (?, ?)`).bind(product.id, nextEan()).run();
