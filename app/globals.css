@@ -819,3 +819,33 @@ td small { margin-top: .16rem; font-size: .62rem; }
 .scan-variant-stock { display: flex; gap: 6px; }
 .scan-variant-stock .chip { font-size: .74rem; font-weight: 700; padding: 4px 9px; border-radius: 999px; background: rgba(255,255,255,.07); white-space: nowrap; }
 @media (max-width: 560px) { .scan-variant { flex-wrap: wrap; } .scan-variant-stock { order: 3; } }
+
+/* ===== Placeholder foto prodotto (niente icona "rotta") ===== */
+.thumb-ph { display: grid; place-items: center; background: linear-gradient(135deg, rgba(114,215,255,.14), rgba(163,230,53,.10)); color: rgba(255,255,255,.55); }
+.thumb-ph span { font-weight: 800; letter-spacing: .04em; }
+.cpc-thumb.thumb-ph span, .thumb.thumb-ph span { font-size: 1.5rem; }
+.product-detail-photo.thumb-ph span, .scan-photo.thumb-ph span { font-size: 2rem; }
+img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit: cover; }
+
+/* ===== Nuovo prodotto: form compatto ===== */
+.np-form .product-base-fields { margin-bottom: 4px; }
+.variant-builder-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
+.nv-head { display: none; }
+.nv-list { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; padding: 2px; }
+.nv-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 12px; }
+.nv-in { flex: 1 1 130px; min-width: 0; min-height: 44px; padding: .55rem .75rem; border: 1px solid #cfe0ea; border-radius: 10px; font: inherit; background: var(--panel); }
+.nv-in:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(20,159,216,.16); }
+.nv-sm { flex: 0 0 88px; }
+.nv-with-btn { flex: 2 1 180px; display: flex; gap: 6px; min-width: 0; }
+.nv-with-btn .nv-in { flex: 1; }
+.nv-btn { flex: 0 0 42px; border: 1px solid #cfe0ea; border-radius: 10px; background: var(--panel); color: var(--green); display: grid; place-items: center; cursor: pointer; }
+.nv-btn:hover { background: var(--mint); }
+.nv-photo { flex: 0 0 46px; height: 44px; border: 1px dashed #cfe0ea; border-radius: 10px; display: grid; place-items: center; cursor: pointer; overflow: hidden; color: var(--ink-soft); }
+.nv-photo img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ===== Stati vuoti guidati ===== */
+.empty-guide { text-align: center; padding: 42px 20px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--ink-soft); }
+.empty-guide .material-symbols-rounded { font-size: 52px; opacity: .5; }
+.empty-guide h3 { margin: 6px 0 0; color: var(--ink); }
+.empty-guide p { max-width: 400px; margin: 0; }
+.empty-guide-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
