@@ -857,3 +857,11 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .customer-hist-title { font-size: .95rem; margin: 6px 0 10px; }
 .customer-card { align-items: center; }
 .customer-card > .material-symbols-rounded { color: var(--ink-soft); margin-left: auto; }
+
+/* ===== Tabella clienti ===== */
+.clients-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.clients-table th.sortable .material-symbols-rounded { font-size: 15px; vertical-align: middle; margin-left: 4px; color: var(--green); }
+.clickable-row { cursor: pointer; transition: background .1s; }
+.clickable-row:hover { background: rgba(114,215,255,.07); }
+.clients-table .row-arrow { text-align: right; color: var(--ink-soft); width: 40px; }
+.customer-detail .panel-title { align-items: center; }
