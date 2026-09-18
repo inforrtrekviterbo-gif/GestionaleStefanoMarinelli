@@ -683,6 +683,7 @@ async function createSale(user: SessionUser, body: JsonMap) {
   if (user.role !== "admin" && user.store !== store) return json({ error: "Questa cassa non può operare sull'altro negozio." }, 403);
   const items = normalizeItems(body.items);
   if (!items.length) return json({ error: "Il carrello è vuoto." }, 400);
+  if (items.filter((item) => item.itemType === "return").length > 1) return json({ error: "Registra un solo reso per scontrino." }, 409);
 
   const subtotal = Math.round(items.reduce((sum, item) => sum + item.quantity * item.unitPrice * (1 - item.discountPercent / 100), 0) * 100) / 100;
   const total = Math.round(numberValue(body.total, subtotal) * 100) / 100;
@@ -748,7 +749,7 @@ async function createSale(user: SessionUser, body: JsonMap) {
       const expiresAt = originalGift.expiresAt && new Date(originalGift.expiresAt) > new Date() ? originalGift.expiresAt : null;
       replacementGiftPlan = { originalGiftId: originalGift.id, code: ean13(), beneficiary: originalGift.beneficiary, value, expiresAt };
     } else {
-      const customer = customerId ? await database().prepare(`SELECT TRIM(first_name || ' ' || last_name) AS name FROM customers WHERE id = ?`).bind(customerId).first<{ name: string }>() : null;
+      const customer = customerId ? await database().prepare(`SELECT COALESCE(CASE WHEN customer_type = 'company' THEN company_name ELSE TRIM(first_name || ' ' || last_name) END, '') AS name FROM customers WHERE id = ?`).bind(customerId).first<{ name: string }>() : null;
       const beneficiary = customer?.name?.trim() || "Buono al portatore";
       replacementGiftPlan = { originalGiftId: null, code: ean13(), beneficiary, value: Math.round(Math.abs(total) * 100) / 100, expiresAt: null };
     }
@@ -759,7 +760,6 @@ async function createSale(user: SessionUser, body: JsonMap) {
     giftCodeUsed = replacementGiftPlan.code;
   }
 
-  if (items.filter((item) => item.itemType === "return").length > 1) return json({ error: "Registra un solo reso per scontrino." }, 409);
   const inventoryErrors: string[] = [];
   for (const item of items) {
     if (item.itemType === "deposit") {
