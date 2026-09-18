@@ -38,7 +38,7 @@ export type CartItem = {
   locked?: boolean;
   metadata: Record<string, unknown>;
 };
-export type PendingCashAction = { kind: "reservationDeposit" | "reservationDelivery"; reservationId: number; label: string; lines: CartItem[] };
+export type PendingCashAction = { kind: "reservationDeposit" | "reservationDelivery" | "return"; reservationId?: number; label: string; lines: CartItem[] };
 
 type ReservationDraftLine = {
   key: string;
@@ -485,7 +485,7 @@ function DepositForm({ products, store, repair, add, close }: { products: Produc
 type ReturnProduct = Pick<Product, "id" | "name" | "color" | "size">;
 type ReturnableLine = { saleItemId: number; saleId: number; productId: number | null; description: string; itemType: string; receiptNo: string; createdAt: string; customerName: string; originalGiftCode: string | null; unitPrice: number; discountPercent: number; finalUnitPrice: number; purchasedQty: number; returnedQty: number; returnableQty: number };
 
-function ReturnForm({ store, add, close }: { store: Store; add: (item: CartItem) => void; close: () => void }) {
+export function ReturnForm({ store, add, close }: { store: Store; add: (item: CartItem) => void; close: () => void }) {
   const [ean, setEan] = useState(""); const [receipt, setReceipt] = useState(""); const [selectedLine, setSelectedLine] = useState<ReturnableLine | null>(null); const [receiptLines, setReceiptLines] = useState<ReturnableLine[]>([]); const [quantity, setQuantity] = useState("1"); const [error, setError] = useState(""); const lastAutomatic = useRef("");
   async function recognize(value = ean) {
     const code = value.trim();
@@ -684,7 +684,13 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed, car
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAction]);
 
-  function addDraft(item: CartItem) { setCart((current) => [...current, item]); setTotalOverride(""); setModal(null); }
+  function addDraft(item: CartItem) {
+    setCart((current) => {
+      if (item.itemType === "return" && current.some((row) => row.itemType === "return")) { setError("È già presente un reso in questa vendita (uno per scontrino)."); return current; }
+      return [...current, item];
+    });
+    setTotalOverride(""); setModal(null);
+  }
   function updateItem(key: string, change: Partial<CartItem>) { setCart((current) => current.map((item) => item.key === key ? { ...item, ...change } : item)); setTotalOverride(""); }
   function removeItem(key: string) { setCart((current) => current.filter((item) => item.key !== key)); setTotalOverride(""); }
 
