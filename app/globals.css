@@ -938,3 +938,8 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .disc-field.cart-disc { display: flex; width: 100%; margin-bottom: .7rem; }
 .disc-field.cart-disc input { flex: 1; text-align: left; padding: 0 .6rem; height: 40px; }
 .disc-field.cart-disc .disc-toggle { height: 40px; }
+
+/* Via i sottotitoli (eyebrow) in cima a tutte le pagine */
+.screen-head .eyebrow { display: none; }
+/* Cassa: totale scontato in evidenza */
+.grand-total.discounted strong { color: var(--lime, #72d7ff); }
