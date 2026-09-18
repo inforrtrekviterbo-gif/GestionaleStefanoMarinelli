@@ -1086,8 +1086,8 @@ async function createReservation(user: SessionUser, body: JsonMap) {
   const code = ean13();
   const now = new Date().toISOString();
   const balanceDue = Math.round((total - deposit) * 100) / 100;
-  const created = await database().prepare(`INSERT INTO reservations (code, store, customer_id, product_id, description, kind, total_price, deposit_amount, balance_due, status, issued_sale_id, expected_delivery, deposit_paid, created_at) VALUES (?, ?, ?, NULL, ?, 'reservation', ?, ?, ?, 'open', NULL, ?, 0, ?)`)
-    .bind(code, store, customerId, description, total, deposit, balanceDue, expectedDelivery || null, now).run();
+  const created = await database().prepare(`INSERT INTO reservations (code, store, customer_id, product_id, description, kind, total_price, deposit_amount, balance_due, status, issued_sale_id, expected_delivery, deposit_paid, note, created_at) VALUES (?, ?, ?, NULL, ?, 'reservation', ?, ?, ?, 'open', NULL, ?, 0, ?, ?)`)
+    .bind(code, store, customerId, description, total, deposit, balanceDue, expectedDelivery || null, note || null, now).run();
   const reservationId = Number(created.meta?.last_row_id);
   if (!reservationId) return json({ error: "Prenotazione non registrata." }, 500);
   for (const item of items) {
@@ -1096,7 +1096,6 @@ async function createReservation(user: SessionUser, body: JsonMap) {
       .bind(reservationId, item.productId, item.description, item.quantity, item.unitPrice, item.discountPercent).run();
     await database().prepare(`UPDATE inventory SET reserved = reserved + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, store).run();
   }
-  void note;
   await logActivity({ user, action: "create", entity: "reservation", entityId: reservationId, detail: `Prenotazione ${code} · ${description}`, store });
   return json({ ok: true, id: reservationId, code });
 }
