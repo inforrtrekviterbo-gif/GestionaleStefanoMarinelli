@@ -737,15 +737,21 @@ async function createSale(user: SessionUser, body: JsonMap) {
     originalFiscalReference = fiscalReferenceFromResponse(originalJob?.deviceResponse);
   }
 
-  let replacementGiftPlan: { originalGiftId: number; code: string; beneficiary: string; value: number; expiresAt: string } | null = null;
-  if (total < -0.001 && returnGiftCodes.size) {
+  let replacementGiftPlan: { originalGiftId: number | null; code: string; beneficiary: string; value: number; expiresAt: string | null } | null = null;
+  if (total < -0.001) {
     if (returnGiftCodes.size > 1) return json({ error: "Per generare correttamente i buoni residui, registra separatamente i resi provenienti da buoni diversi." }, 409);
-    const originalGiftCode = [...returnGiftCodes][0];
-    const originalGift = await database().prepare(`SELECT id, beneficiary, balance, expires_at AS expiresAt FROM gift_cards WHERE code = ?`).bind(originalGiftCode).first<{ id: number; beneficiary: string; balance: number; expiresAt: string }>();
-    if (!originalGift) return json({ error: "Il buono usato nella vendita originale non è più disponibile per lo storno automatico." }, 409);
-    const value = Math.round((Math.max(0, Number(originalGift.balance) || 0) + Math.abs(total)) * 100) / 100;
-    const expiresAt = new Date(originalGift.expiresAt) > new Date() ? originalGift.expiresAt : new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
-    replacementGiftPlan = { originalGiftId: originalGift.id, code: ean13(), beneficiary: originalGift.beneficiary, value, expiresAt };
+    if (returnGiftCodes.size === 1) {
+      const originalGiftCode = [...returnGiftCodes][0];
+      const originalGift = await database().prepare(`SELECT id, beneficiary, balance, expires_at AS expiresAt FROM gift_cards WHERE code = ?`).bind(originalGiftCode).first<{ id: number; beneficiary: string; balance: number; expiresAt: string | null }>();
+      if (!originalGift) return json({ error: "Il buono usato nella vendita originale non è più disponibile per lo storno automatico." }, 409);
+      const value = Math.round((Math.max(0, Number(originalGift.balance) || 0) + Math.abs(total)) * 100) / 100;
+      const expiresAt = originalGift.expiresAt && new Date(originalGift.expiresAt) > new Date() ? originalGift.expiresAt : null;
+      replacementGiftPlan = { originalGiftId: originalGift.id, code: ean13(), beneficiary: originalGift.beneficiary, value, expiresAt };
+    } else {
+      const customer = customerId ? await database().prepare(`SELECT TRIM(first_name || ' ' || last_name) AS name FROM customers WHERE id = ?`).bind(customerId).first<{ name: string }>() : null;
+      const beneficiary = customer?.name?.trim() || "Buono al portatore";
+      replacementGiftPlan = { originalGiftId: null, code: ean13(), beneficiary, value: Math.round(Math.abs(total) * 100) / 100, expiresAt: null };
+    }
     cash = 0;
     card = 0;
     bank = 0;
@@ -753,6 +759,7 @@ async function createSale(user: SessionUser, body: JsonMap) {
     giftCodeUsed = replacementGiftPlan.code;
   }
 
+  if (items.filter((item) => item.itemType === "return").length > 1) return json({ error: "Registra un solo reso per scontrino." }, 409);
   const inventoryErrors: string[] = [];
   for (const item of items) {
     if (item.itemType === "deposit") {
@@ -879,7 +886,7 @@ async function createSale(user: SessionUser, body: JsonMap) {
       .bind(replacementGiftPlan.code, replacementGiftPlan.beneficiary, replacementGiftPlan.value, replacementGiftPlan.value, replacementGiftPlan.expiresAt, store, saleId, createdAt).run();
     const createdGiftId = createdGift.meta?.last_row_id;
     if (!createdGiftId) return json({ error: "Il reso è stato registrato ma non è stato possibile generare il buono residuo. Contatta l'amministratore." }, 500);
-    await database().prepare(`UPDATE gift_cards SET balance = 0, status = 'reversed' WHERE id = ?`).bind(replacementGiftPlan.originalGiftId).run();
+    if (replacementGiftPlan.originalGiftId) await database().prepare(`UPDATE gift_cards SET balance = 0, status = 'reversed' WHERE id = ?`).bind(replacementGiftPlan.originalGiftId).run();
     replacementGift = { id: Number(createdGiftId), code: replacementGiftPlan.code, value: replacementGiftPlan.value, beneficiary: replacementGiftPlan.beneficiary };
   }
 
