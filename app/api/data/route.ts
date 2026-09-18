@@ -1054,6 +1054,66 @@ async function createTransfer(user: SessionUser, body: JsonMap) {
   return json({ ok: true, transferId, code });
 }
 
+async function createReservation(user: SessionUser, body: JsonMap) {
+  const store = validStore(body.store) ? body.store : user.store;
+  if (!store) return json({ error: "Seleziona il negozio." }, 400);
+  if (user.role !== "admin" && user.store !== store) return json({ error: "Puoi prenotare solo per il tuo negozio." }, 403);
+  const type = stringValue(body.type) === "service" ? "service" : "product";
+  const note = stringValue(body.note);
+  const expectedDelivery = stringValue(body.expectedDelivery).trim();
+  if (expectedDelivery && !/^\d{4}-\d{2}-\d{2}$/.test(expectedDelivery)) return json({ error: "Data di consegna non valida." }, 400);
+  const deposit = Math.max(0, Math.round(numberValue(body.depositAmount) * 100) / 100);
+
+  let customerId: number | null = body.customerId != null ? Math.round(numberValue(body.customerId)) : null;
+  if (!customerId) {
+    const firstName = stringValue(body.firstName).trim();
+    const lastName = stringValue(body.lastName).trim();
+    if (firstName || lastName) {
+      const created = await database().prepare(`INSERT INTO customers (customer_type, first_name, last_name, company_name, vat_number, pec, sdi_code, phone, email, address, postal_code, city, province, tax_code, scope, created_store, created_at) VALUES ('private', ?, ?, '', '', '', '', '', '', '', '', '', '', '', ?, ?, ?)`)
+        .bind(firstName, lastName, store, store, new Date().toISOString()).run();
+      customerId = Number(created.meta?.last_row_id) || null;
+    }
+  }
+
+  const items = type === "product" ? normalizeReservationLines(body.items) : [];
+  const description = type === "service" ? (stringValue(body.serviceDescription).trim() || "Servizio") : "Prenotazione prodotti";
+  const total = type === "service"
+    ? Math.max(0, Math.round(numberValue(body.serviceAmount) * 100) / 100)
+    : Math.round(items.reduce((sum, item) => sum + item.quantity * item.unitPrice * (1 - item.discountPercent / 100), 0) * 100) / 100;
+  if (total <= 0) return json({ error: "Aggiungi almeno un articolo o un importo." }, 400);
+  if (deposit > total) return json({ error: "L'acconto non può superare il totale." }, 400);
+
+  const code = ean13();
+  const now = new Date().toISOString();
+  const balanceDue = Math.round((total - deposit) * 100) / 100;
+  const created = await database().prepare(`INSERT INTO reservations (code, store, customer_id, product_id, description, kind, total_price, deposit_amount, balance_due, status, issued_sale_id, expected_delivery, deposit_paid, created_at) VALUES (?, ?, ?, NULL, ?, 'reservation', ?, ?, ?, 'open', NULL, ?, 0, ?)`)
+    .bind(code, store, customerId, description, total, deposit, balanceDue, expectedDelivery || null, now).run();
+  const reservationId = Number(created.meta?.last_row_id);
+  if (!reservationId) return json({ error: "Prenotazione non registrata." }, 500);
+  for (const item of items) {
+    if (!item.productId) continue;
+    await database().prepare(`INSERT INTO reservation_items (reservation_id, product_id, description, quantity, unit_price, discount_percent) VALUES (?, ?, ?, ?, ?, ?)`)
+      .bind(reservationId, item.productId, item.description, item.quantity, item.unitPrice, item.discountPercent).run();
+    await database().prepare(`UPDATE inventory SET reserved = reserved + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, store).run();
+  }
+  void note;
+  await logActivity({ user, action: "create", entity: "reservation", entityId: reservationId, detail: `Prenotazione ${code} · ${description}`, store });
+  return json({ ok: true, id: reservationId, code });
+}
+
+async function cancelReservation(user: SessionUser, body: JsonMap) {
+  const id = Math.round(numberValue(body.id));
+  const reservation = await database().prepare(`SELECT id, store, status FROM reservations WHERE id = ?`).bind(id).first<{ id: number; store: Store; status: string }>();
+  if (!reservation) return json({ error: "Prenotazione non trovata." }, 404);
+  if (user.role !== "admin" && user.store !== reservation.store) return json({ error: "Operazione non consentita." }, 403);
+  if (reservation.status !== "open") return json({ error: "Solo le prenotazioni aperte possono essere annullate." }, 409);
+  const items = await all<{ productId: number | null; quantity: number }>(`SELECT product_id AS productId, quantity FROM reservation_items WHERE reservation_id = ?`, id);
+  for (const item of items) if (item.productId) await database().prepare(`UPDATE inventory SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, reservation.store).run();
+  await database().prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?`).bind(id).run();
+  await logActivity({ user, action: "cancel", entity: "reservation", entityId: id, store: reservation.store });
+  return json({ ok: true });
+}
+
 async function completeTransfer(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const id = Math.round(numberValue(body.id));
@@ -1193,6 +1253,8 @@ async function postImpl(request: Request) {
     if (action === "deleteService") return deleteService(auth.user, body);
     if (action === "createSale") return createSale(auth.user, body);
     if (action === "createTransfer") return createTransfer(auth.user, body);
+    if (action === "createReservation") return createReservation(auth.user, body);
+    if (action === "cancelReservation") return cancelReservation(auth.user, body);
     if (action === "completeTransfer") return completeTransfer(auth.user, body);
     if (action === "rejectTransfer") return rejectTransfer(auth.user, body);
     if (action === "updateTransfer") return updateTransfer(auth.user, body);
