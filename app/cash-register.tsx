@@ -581,6 +581,22 @@ function CustomerInline({ data, store, customer, onSelect, reload }: {
   </div>;
 }
 
+function OperationsMenu({ store, onPick }: { store: Store; onPick: (modal: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const items: [string, string, string][] = [
+    ["gift", "redeem", "Buono regalo"],
+    ["varie", "shopping_bag", "Varie"],
+    ["reservation", "calendar_month", "Prenotazione"],
+    ["return", "sync_alt", "Reso / Cambio"],
+    store === "Viterbo" ? ["repair", "footprint", "Risuolatura"] : ["shirt", "checkroom", "Maglie Gran Sasso"],
+  ];
+  return <div className="ops-menu">
+    {open && <button className="ops-backdrop" aria-label="Chiudi" onClick={() => setOpen(false)} />}
+    <button type="button" className="secondary" onClick={() => setOpen((v) => !v)}><MaterialIcon>bolt</MaterialIcon> Operazioni <MaterialIcon>{open ? "expand_less" : "expand_more"}</MaterialIcon></button>
+    {open && <div className="ops-dropdown">{items.map(([key, icon, label]) => <button type="button" key={key} onClick={() => { onPick(key); setOpen(false); }}><MaterialIcon>{icon}</MaterialIcon> {label}</button>)}</div>}
+  </div>;
+}
+
 export default function CashRegister({ data, reload, queue, onQueueConsumed }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void }) {
   const [adminStore, setAdminStore] = useState<Store>("Viterbo");
   const store = data.user.store ?? adminStore;
@@ -770,7 +786,7 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
             <CashSearch products={data.products} services={data.services} available={available} onProduct={addProduct} onService={addService} />
           </div>
           <CustomerInline data={data} store={store} customer={customer} onSelect={setCustomer} reload={reload} />
-          <div className="actions-strip"><button className="action-gift" onClick={() => setModal("gift")}><MaterialIcon>redeem</MaterialIcon><span>Buono regalo</span></button><button className="action-varie" onClick={() => setModal("varie")}><MaterialIcon>shopping_bag</MaterialIcon><span>Varie</span></button>{store === "Viterbo" ? <button className="action-repair" onClick={() => setModal("repair")}><MaterialIcon>footprint</MaterialIcon><span>Risuolatura</span></button> : <button className="action-shirt" onClick={() => setModal("shirt")}><MaterialIcon>checkroom</MaterialIcon><span>Maglie Gran Sasso</span></button>}<button className="action-reservation" onClick={() => setModal("reservation")}><MaterialIcon>calendar_month</MaterialIcon><span>Prenotazione</span></button><button className="action-return" onClick={() => setModal("return")}><MaterialIcon>sync_alt</MaterialIcon><span>Reso / cambio</span></button></div>
+          <OperationsMenu store={store} onPick={setModal} />
           <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Scansiona un EAN per inserire automaticamente il prodotto.</Empty> : <div className="cart-list">{cart.map((item) => {
   const product = item.productId != null ? data.products.find((p) => p.id === item.productId) : undefined;
   const details = cartDetailLines(item);

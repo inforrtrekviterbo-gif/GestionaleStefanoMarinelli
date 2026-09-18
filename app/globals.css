@@ -913,3 +913,10 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .customer-inline-drop small { color: var(--muted, #8aa0b5); font-size: .74rem; }
 .customer-chip { display: inline-flex; align-items: center; gap: .5rem; padding: .45rem .8rem; border: 1px solid rgba(66,199,255,.3); border-radius: 999px; }
 .customer-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; display: grid; place-items: center; }
+
+/* Cassa: menu operazioni */
+.ops-menu { position: relative; display: inline-flex; }
+.ops-backdrop { position: fixed; inset: 0; z-index: 15; border: 0; background: transparent; }
+.ops-dropdown { position: absolute; z-index: 16; top: calc(100% + .35rem); right: 0; min-width: 220px; display: flex; flex-direction: column; padding: .4rem; border: 1px solid rgba(66,199,255,.2); border-radius: 12px; background: var(--panel); box-shadow: 0 18px 40px rgba(0,0,0,.42); }
+.ops-dropdown button { display: flex; align-items: center; gap: .6rem; padding: .6rem .7rem; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; font-weight: 650; cursor: pointer; }
+.ops-dropdown button:hover { background: rgba(66,199,255,.12); }
