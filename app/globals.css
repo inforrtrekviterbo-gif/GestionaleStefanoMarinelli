@@ -875,3 +875,21 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .excel-dropdown button:hover { background: rgba(66,199,255,.12); }
 .excel-dropdown button .material-symbols-rounded { font-size: 19px; }
 @media (max-width: 720px) { .excel-menu { width: 100%; } .excel-menu > button { width: 100%; justify-content: center; } .excel-dropdown { left: 0; right: 0; width: 100%; } }
+
+/* Cassa: righe carrello a card leggibili */
+.cart-line { display: flex; align-items: center; gap: .8rem; padding: .7rem .9rem; border: 1px solid rgba(66,199,255,.14); border-radius: 14px; background: var(--panel); margin-bottom: .55rem; }
+.cart-line.return-row { border-color: rgba(255,138,156,.4); }
+.cart-line-thumb { width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; }
+.cart-line-main { flex: 1; min-width: 0; }
+.cart-line-name { display: block; font-weight: 750; }
+.cart-line-sub { color: var(--muted, #8aa0b5); font-size: .78rem; }
+.qty-stepper { display: inline-flex; align-items: center; border: 1px solid rgba(66,199,255,.3); border-radius: 10px; overflow: hidden; }
+.qty-stepper button { width: 36px; height: 36px; border: 0; background: rgba(66,199,255,.08); color: inherit; font-size: 1.1rem; font-weight: 800; cursor: pointer; }
+.qty-stepper input { width: 46px; height: 36px; border: 0; background: transparent; color: inherit; text-align: center; font-weight: 700; }
+.disc-field { display: inline-flex; align-items: center; border: 1px solid rgba(66,199,255,.3); border-radius: 10px; overflow: hidden; }
+.disc-field input { width: 62px; height: 36px; border: 0; background: transparent; color: inherit; text-align: right; padding: 0 .35rem; }
+.disc-toggle { width: 34px; height: 36px; border: 0; background: rgba(66,199,255,.12); color: inherit; font-weight: 800; cursor: pointer; }
+.cart-line-total { min-width: 84px; text-align: right; font-weight: 850; font-size: 1.05rem; }
+.cart-line-remove { width: 36px; height: 36px; border-radius: 10px; border: 0; background: rgba(255,138,156,.14); color: #ff8a9c; display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.cart-line-locked { min-width: 92px; text-align: center; color: var(--muted, #8aa0b5); font-weight: 700; }
+@media (max-width: 720px) { .cart-line { flex-wrap: wrap; } .cart-line-total { min-width: auto; } }

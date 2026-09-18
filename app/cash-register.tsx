@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 
 type Store = "Viterbo" | "Gran Sasso";
 type User = { role: "admin" | "viterbo" | "gran_sasso"; store: Store | null };
@@ -280,6 +280,46 @@ function cartDetailLines(item: CartItem): CartDetailLine[] {
       discountPercent: Math.min(100, Math.max(0, Number(detail.discountPercent) || 0)),
     };
   }).filter((row) => row.description.trim());
+}
+
+// Converte uno sconto in euro (sull'imponibile riga) in percentuale 0..100.
+function euroDiscountToPercent(quantity: number, unitPrice: number, euro: number) {
+  const base = quantity * unitPrice;
+  if (base <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((euro / base) * 10000) / 100));
+}
+// Percentuale -> euro scontati (per mostrare l'importo quando la modalità è €).
+function percentToEuroDiscount(quantity: number, unitPrice: number, percent: number) {
+  return Math.round(quantity * unitPrice * (percent / 100) * 100) / 100;
+}
+
+function CartRow({ item, product, onQty, onDiscountPercent, onRemove }: {
+  item: CartItem;
+  product: Product | undefined;
+  onQty: (quantity: number) => void;
+  onDiscountPercent: (percent: number) => void;
+  onRemove: () => void;
+}) {
+  const [mode, setMode] = useState<"pct" | "eur">("pct");
+  const editable = !item.locked && item.quantity > 0 && !["gift", "deposit", "repair_deposit", "return", "reservation_balance"].includes(item.itemType);
+  const discountValue = mode === "pct" ? item.discountPercent : percentToEuroDiscount(item.quantity, item.unitPrice, item.discountPercent);
+  function applyDiscount(raw: string) {
+    const num = Math.max(0, Number(raw) || 0);
+    onDiscountPercent(mode === "pct" ? Math.min(100, num) : euroDiscountToPercent(item.quantity, item.unitPrice, num));
+  }
+  return <div className={`cart-line ${item.itemType === "return" ? "return-row" : ""}`}>
+    <ProductThumb photoKey={product?.photoKey} name={item.description} className="cart-line-thumb" />
+    <div className="cart-line-main">
+      <strong className="cart-line-name">{item.description}</strong>
+      <small className="cart-line-sub">{money(item.unitPrice)} cad.{item.itemType !== "product" ? ` · ${item.itemType.replaceAll("_", " ")}` : ""}</small>
+    </div>
+    {editable ? <>
+      <div className="qty-stepper"><button type="button" onClick={() => onQty(Math.max(1, item.quantity - 1))} aria-label="Diminuisci">−</button><input type="number" min="1" step="1" value={item.quantity} onChange={(e) => onQty(Math.max(0, Number(e.target.value) || 0))} aria-label="Quantità" /><button type="button" onClick={() => onQty(item.quantity + 1)} aria-label="Aumenta">+</button></div>
+      <div className="disc-field"><input type="number" min="0" step="0.01" value={discountValue} onChange={(e) => applyDiscount(e.target.value)} aria-label="Sconto" /><button type="button" className="disc-toggle" onClick={() => setMode((m) => m === "pct" ? "eur" : "pct")} aria-label="Cambia unità sconto">{mode === "pct" ? "%" : "€"}</button></div>
+    </> : <><span className="cart-line-locked">×{item.quantity}</span><span /></>}
+    <b className="cart-line-total">{money(lineTotal(item))}</b>
+    <button type="button" className="cart-line-remove" onClick={onRemove} aria-label="Rimuovi"><MaterialIcon>delete</MaterialIcon></button>
+  </div>;
 }
 
 function Scanner({ onScan }: { onScan: (code: string) => Promise<void> }) {
@@ -688,7 +728,17 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
           })()}</div>
           <div className="panel"><div className="panel-title"><div><p className="eyebrow">CLIENTE</p><h2>{customer ? customerLabel(customer) : "Associa cliente o azienda"}</h2></div>{customer && <button className="text-button" onClick={() => setCustomer(null)}>Rimuovi</button>}</div><ClearableInput value={customerQuery} onChange={setCustomerQuery} placeholder="Nome, società o P.IVA…" />{customerMatches.length > 0 && <div className="customer-dropdown">{customerMatches.map((item) => <button key={item.id} onClick={() => { setCustomer(item); setCustomerQuery(""); }}><strong>{customerLabel(item)}</strong><small>{item.vatNumber || item.city || item.phone || item.scope}</small></button>)}</div>}</div>
           <div className="actions-strip"><button className="action-customer" onClick={() => setModal("customer")}><MaterialIcon>person_add</MaterialIcon><span>Nuovo cliente</span></button><button className="action-gift" onClick={() => setModal("gift")}><MaterialIcon>redeem</MaterialIcon><span>Buono regalo</span></button><button className="action-varie" onClick={() => setModal("varie")}><MaterialIcon>shopping_bag</MaterialIcon><span>Varie</span></button>{store === "Viterbo" ? <button className="action-repair" onClick={() => setModal("repair")}><MaterialIcon>footprint</MaterialIcon><span>Risuolatura</span></button> : <button className="action-shirt" onClick={() => setModal("shirt")}><MaterialIcon>checkroom</MaterialIcon><span>Maglie Gran Sasso</span></button>}<button className="action-reservation" onClick={() => setModal("reservation")}><MaterialIcon>calendar_month</MaterialIcon><span>Prenotazione</span></button><button className="action-return" onClick={() => setModal("return")}><MaterialIcon>sync_alt</MaterialIcon><span>Reso / cambio</span></button></div>
-          <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Scansiona un EAN per inserire automaticamente il prodotto.</Empty> : <><div className="cart-header"><span>Prodotto</span><span>Qtà</span><span>Prezzo vendita</span><span>Sconto %</span><span>Totale modificabile</span><span /></div><div className="cart-list">{cart.map((item) => { const details = cartDetailLines(item); const editableTotal = !item.locked && item.quantity > 0 && !["gift", "deposit", "repair_deposit"].includes(item.itemType); return <div className={`cart-row cash-cart-row ${item.itemType === "return" ? "return-row" : ""}`} key={item.key}><div className="cart-desc"><strong>{item.description}</strong><small>{item.itemType.replaceAll("_", " ")}</small></div><ClearableInput compact aria-label="Quantità" type="number" step="1" value={item.quantity} onChange={(value) => updateItem(item.key, { quantity: Number(value) || 0 })} disabled={item.locked} /><ClearableInput compact aria-label="Prezzo di vendita unitario" type="number" step="0.01" value={item.unitPrice} onChange={(value) => updateItem(item.key, { unitPrice: Number(value) || 0 })} disabled={item.locked} /><ClearableInput compact aria-label="Sconto percentuale" type="number" min="0" max="100" step="0.01" value={item.discountPercent} onChange={(value) => updateItem(item.key, { discountPercent: Math.min(100, Math.max(0, Number(value) || 0)) })} disabled={item.locked} />{editableTotal ? <ClearableInput compact aria-label="Importo totale prodotto" type="number" min="0" max={item.quantity * item.unitPrice} step="0.01" value={lineTotal(item)} onChange={(value) => updateItemTotal(item, value)} /> : <b>{money(lineTotal(item))}</b>}<button className="icon-button" onClick={() => removeItem(item.key)}><MaterialIcon>close</MaterialIcon></button>{details.length > 0 && <div className="cart-subitems"><div className="cart-subitems-head"><span>Dettaglio prodotti</span><span>Qtà</span><span>Costo</span></div>{details.map((detail, index) => <div className="cart-subitem" key={`${item.key}-detail-${index}`}><span>{detail.description}</span><span>{detail.quantity}</span><b>{money(detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100))}</b></div>)}<div className="cart-subitems-total"><span>Totale operazione</span><b>{money(Number(item.metadata.totalPrice) || details.reduce((sum, detail) => sum + detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100), 0))}</b></div></div>}</div>; })}</div></>}</div>
+          <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Scansiona un EAN per inserire automaticamente il prodotto.</Empty> : <div className="cart-list">{cart.map((item) => {
+  const product = item.productId != null ? data.products.find((p) => p.id === item.productId) : undefined;
+  const details = cartDetailLines(item);
+  return <Fragment key={item.key}>
+    <CartRow item={item} product={product}
+      onQty={(quantity) => updateItem(item.key, { quantity })}
+      onDiscountPercent={(percent) => updateItem(item.key, { discountPercent: percent })}
+      onRemove={() => removeItem(item.key)} />
+    {details.length > 0 && <div className="cart-subitems"><div className="cart-subitems-head"><span>Dettaglio prodotti</span><span>Qtà</span><span>Costo</span></div>{details.map((detail, index) => <div className="cart-subitem" key={`${item.key}-detail-${index}`}><span>{detail.description}</span><span>{detail.quantity}</span><b>{money(detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100))}</b></div>)}</div>}
+  </Fragment>;
+})}</div>}</div>
         </div>
         <aside className="checkout">
           <div><p className="eyebrow">RIEPILOGO</p>{hasReturn && <div className="exchange-summary"><div><span>Valore reso</span><b>− {money(returnCredit)}</b></div><div><span>Nuovi articoli</span><b>{money(exchangePurchase)}</b></div><div className={total < 0 ? "refund" : "difference"}><span>{total > 0 ? "Differenza da incassare" : total < 0 ? createsResidualGift ? "Credito su nuovo buono" : "Rimborso al cliente" : "Cambio alla pari"}</span><strong>{money(Math.abs(total))}</strong></div></div>}<div className="total-line"><span>Prezzo prima degli sconti</span><b>{money(priceBeforeDiscounts)}</b></div><div className="total-line"><span>Dopo sconti prodotti</span><b>{money(subtotal)}</b></div><ClearableInput label="Sconto totale carrello %" type="number" min="0" max="100" step="0.01" value={cartDiscount} onChange={(value) => { setCartDiscount(value); setTotalOverride(""); }} /><ClearableInput label="Totale carrello modificabile" type="number" step="0.01" value={totalOverride} onChange={setTotalOverride} placeholder={totalAfterCartDiscount.toFixed(2)} /><div className="grand-total"><span>{hasReturn ? "Differenza finale" : "Totale"}</span><strong>{money(total)}</strong></div></div>
