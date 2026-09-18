@@ -170,10 +170,9 @@ async function customerRows() {
 }
 
 async function bootstrap(user: SessionUser) {
-  const rawProducts = await productRows();
-  const products = user.role === "admin" ? rawProducts : rawProducts.map((product) => user.store === "Viterbo"
-    ? { ...product, granSassoQty: 0, granSassoReserved: 0 }
-    : { ...product, viterboQty: 0, viterboReserved: 0 });
+  // Giacenze di entrambi i negozi visibili a tutti: servono per richiedere
+  // trasferimenti dall'altro negozio e per il controllo scorte.
+  const products = await productRows();
   const allCustomers = await customerRows();
   const customers = user.role === "admin" ? allCustomers : allCustomers.filter((customer) => customer.createdStore === user.store);
   const allSales = await all<{ store: string } & Record<string, unknown>>(`SELECT s.id, s.receipt_no AS receiptNo, s.store, s.customer_id AS customerId, s.type, s.subtotal, s.adjustment, s.total, s.cash_amount AS cashAmount, s.card_amount AS cardAmount, s.bank_amount AS bankAmount, s.gift_amount AS giftAmount, s.fiscal_status AS fiscalStatus, s.fiscal_document_type AS fiscalDocumentType, s.created_at AS createdAt, COALESCE(CASE WHEN c.customer_type = 'company' THEN c.company_name ELSE TRIM(c.first_name || ' ' || c.last_name) END, 'Cliente non associato') AS customerName FROM sales s LEFT JOIN customers c ON c.id = s.customer_id ORDER BY s.created_at DESC LIMIT 300`);
