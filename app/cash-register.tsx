@@ -27,7 +27,7 @@ type Reservation = { id: number; issuedSaleId: number; kind: string };
 type FiscalDevice = { id: number; store: Store; vendor: string; model: string; enabled: number; hasToken: number; lastSeenAt: string | null; lastStatus: string; lastError: string | null };
 type FiscalJob = { id: number; saleId: number; store: Store; status: string; attempts: number; deviceResponse: string | null; receiptNo: string };
 type CashData = { user: User; products: Product[]; customers: Customer[]; gifts: Gift[]; reservations: Reservation[]; fiscalDevices: FiscalDevice[]; fiscalJobs: FiscalJob[]; generatedAt: string; services: { id: number; name: string; price: number; active: number }[] };
-type CartItem = {
+export type CartItem = {
   key: string;
   productId: number | null;
   description: string;
@@ -599,10 +599,9 @@ function OperationsMenu({ store, onPick }: { store: Store; onPick: (modal: strin
   </div>;
 }
 
-export default function CashRegister({ data, reload, queue, onQueueConsumed }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void }) {
+export default function CashRegister({ data, reload, queue, onQueueConsumed, cart, setCart }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void; cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>> }) {
   const [adminStore, setAdminStore] = useState<Store>("Viterbo");
   const store = data.user.store ?? adminStore;
-  const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [modal, setModal] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
