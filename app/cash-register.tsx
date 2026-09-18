@@ -370,17 +370,6 @@ function useGlobalScanner(onScan: (code: string) => void) {
   }, [onScan]);
 }
 
-function CustomerForm({ store, reload, close }: { store: Store; reload: () => Promise<void>; close: () => void }) {
-  const [form, setForm] = useState({ firstName: "", lastName: "", phone: "", email: "", address: "", postalCode: "", city: "", province: "", taxCode: "" });
-  const [error, setError] = useState("");
-  const set = (name: keyof typeof form) => (value: string) => setForm((current) => ({ ...current, [name]: value }));
-  async function save(event: React.FormEvent) {
-    event.preventDefault(); setError("");
-    try { await post("createCustomer", { ...form, store }); await reload(); close(); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Errore."); }
-  }
-  return <form className="stack" onSubmit={save}><div className="form-grid"><ClearableInput label="Nome" value={form.firstName} onChange={set("firstName")} required autoFocus /><ClearableInput label="Cognome" value={form.lastName} onChange={set("lastName")} required /><ClearableInput label="Telefono (facoltativo)" value={form.phone} onChange={set("phone")} inputMode="tel" /><ClearableInput label="Email (facoltativa)" type="email" value={form.email} onChange={set("email")} /><ClearableInput className="full" label="Indirizzo (facoltativo)" value={form.address} onChange={set("address")} /><ClearableInput label="CAP" value={form.postalCode} onChange={set("postalCode")} /><ClearableInput label="Comune" value={form.city} onChange={set("city")} /><ClearableInput label="Provincia" value={form.province} onChange={set("province")} maxLength={2} /><ClearableInput className="full" label="Codice fiscale (utile per la garanzia)" value={form.taxCode} onChange={set("taxCode")} />{error && <div className="alert danger full">{error}</div>}<div className="form-actions full"><button type="button" className="secondary" onClick={close}>Annulla</button><button className="primary">Salva cliente</button></div></div></form>;
-}
 function GiftForm({ add, close }: { add: (item: CartItem) => void; close: () => void }) {
   const [beneficiary, setBeneficiary] = useState("");
   const [amount, setAmount] = useState("");
@@ -554,12 +543,49 @@ function CashSearch({ products, services, available, onProduct, onService }: {
   </div>;
 }
 
+function CustomerInline({ data, store, customer, onSelect, reload }: {
+  data: CashData;
+  store: Store;
+  customer: Customer | null;
+  onSelect: (customer: Customer | null) => void;
+  reload: () => Promise<void>;
+}) {
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const q = query.trim().toLocaleLowerCase("it");
+  const matches = q ? data.customers.filter((c) => `${customerLabel(c)} ${c.phone}`.toLocaleLowerCase("it").includes(q)).slice(0, 6) : [];
+  const canCreate = q.length >= 2 && !matches.some((c) => customerLabel(c).toLocaleLowerCase("it") === q);
+  async function create() {
+    setError("");
+    const tokens = query.trim().split(/\s+/);
+    const lastName = tokens.length > 1 ? tokens[tokens.length - 1] : tokens[0];
+    const firstName = tokens.length > 1 ? tokens.slice(0, -1).join(" ") : "";
+    setBusy(true);
+    try {
+      const result = await post("createCustomer", { firstName, lastName, store });
+      await reload();
+      if (result?.customer) onSelect(result.customer as Customer);
+      setQuery("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Errore."); }
+    finally { setBusy(false); }
+  }
+  if (customer) return <div className="customer-chip"><MaterialIcon>person</MaterialIcon><span>{customerLabel(customer)}</span><button type="button" onClick={() => onSelect(null)} aria-label="Rimuovi cliente"><MaterialIcon>close</MaterialIcon></button></div>;
+  return <div className="customer-inline">
+    <div className="customer-inline-field"><MaterialIcon>person_search</MaterialIcon><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Associa cliente: Nome Cognome…" /></div>
+    {q && <div className="customer-inline-drop">
+      {matches.map((c) => <button type="button" key={c.id} onClick={() => { onSelect(c); setQuery(""); }}><strong>{customerLabel(c)}</strong><small>{c.phone || c.city || "—"}</small></button>)}
+      {canCreate && <button type="button" className="create" disabled={busy} onClick={create}><MaterialIcon>add</MaterialIcon> Crea "{query.trim()}"</button>}
+      {error && <div className="alert danger">{error}</div>}
+    </div>}
+  </div>;
+}
+
 export default function CashRegister({ data, reload, queue, onQueueConsumed }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void }) {
   const [adminStore, setAdminStore] = useState<Store>("Viterbo");
   const store = data.user.store ?? adminStore;
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [customerQuery, setCustomerQuery] = useState("");
   const [modal, setModal] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -584,7 +610,6 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
   const exchangePurchase = Math.round(cart.filter((item) => item.itemType !== "return").reduce((sum, item) => sum + lineTotal(item), 0) * 100) / 100;
   const hasGiftOriginReturn = cart.some((item) => item.itemType === "return" && Boolean(item.metadata.originalGiftCode));
   const createsResidualGift = hasGiftOriginReturn && total < -0.001;
-  const customerMatches = useMemo(() => { const query = customerQuery.trim().toLocaleLowerCase("it"); return query ? data.customers.filter((item) => `${customerLabel(item)} ${item.vatNumber}`.toLocaleLowerCase("it").includes(query)).slice(0, 8) : []; }, [data.customers, customerQuery]);
   const fiscalDevice = data.fiscalDevices.find((device) => device.store === store);
   const fiscalRecent = Boolean(fiscalDevice?.enabled && fiscalDevice.lastSeenAt && new Date(data.generatedAt).getTime() - new Date(fiscalDevice.lastSeenAt).getTime() < 15000);
   const fiscalOnline = Boolean(fiscalRecent && fiscalDevice?.lastStatus === "online");
@@ -696,7 +721,7 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       const changeDue = payment === "cash" && !hasReturn ? Math.max(0, (Number(cashReceived) || 0) - total) : 0;
       setLastSale({ id: result.saleId, receiptNo: result.receiptNo, automaticFiscalDocument: result.automaticFiscalDocument ?? null, invoiceDocument: result.invoiceDocument ?? null, fiscalJob: result.fiscalJob ?? null, replacementGift: result.replacementGift ?? null });
       setSaleDone({ id: result.saleId, receiptNo: result.receiptNo, total, cash: payment === "cash" && !hasReturn ? (Number(cashReceived) || 0) : null, change: changeDue });
-      setCart([]); setCartDiscount(""); setTotalOverride(""); setCashAmount(""); setCashReceived(""); setCardAmount(""); setGiftAmount(""); setGiftCode(""); setCustomer(null); setCustomerQuery(""); setPayment("cash"); setFiscalDocumentType("receipt");
+      setCart([]); setCartDiscount(""); setTotalOverride(""); setCashAmount(""); setCashReceived(""); setCardAmount(""); setGiftAmount(""); setGiftCode(""); setCustomer(null); setPayment("cash"); setFiscalDocumentType("receipt");
       setNotice(hasReturn ? `Cambio ${result.receiptNo} registrato. ${result.replacementGift ? `Buono precedente stornato: nuovo buono da ${money(result.replacementGift.value)} intestato a ${result.replacementGift.beneficiary}.` : total > 0 ? `Differenza incassata: ${money(total)}.` : total < 0 ? `Rimborso registrato: ${money(Math.abs(total))}.` : "Cambio alla pari."} ${fiscalMessage}` : payment === "bank" ? `Vendita ${result.receiptNo} registrata con bonifico. ${result.invoiceDocument ? `Fattura ${result.invoiceDocument.number} generata automaticamente.` : fiscalMessage}` : `Vendita ${result.receiptNo} registrata. ${fiscalMessage}`);
       if (fiscalError) setError(fiscalError);
       await reload();
@@ -744,8 +769,8 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
             <div className="scanner-panel-head"><p className="eyebrow">SCANNER</p><Scanner onScan={scan} /></div>
             <CashSearch products={data.products} services={data.services} available={available} onProduct={addProduct} onService={addService} />
           </div>
-          <div className="panel"><div className="panel-title"><div><p className="eyebrow">CLIENTE</p><h2>{customer ? customerLabel(customer) : "Associa cliente o azienda"}</h2></div>{customer && <button className="text-button" onClick={() => setCustomer(null)}>Rimuovi</button>}</div><ClearableInput value={customerQuery} onChange={setCustomerQuery} placeholder="Nome, società o P.IVA…" />{customerMatches.length > 0 && <div className="customer-dropdown">{customerMatches.map((item) => <button key={item.id} onClick={() => { setCustomer(item); setCustomerQuery(""); }}><strong>{customerLabel(item)}</strong><small>{item.vatNumber || item.city || item.phone || item.scope}</small></button>)}</div>}</div>
-          <div className="actions-strip"><button className="action-customer" onClick={() => setModal("customer")}><MaterialIcon>person_add</MaterialIcon><span>Nuovo cliente</span></button><button className="action-gift" onClick={() => setModal("gift")}><MaterialIcon>redeem</MaterialIcon><span>Buono regalo</span></button><button className="action-varie" onClick={() => setModal("varie")}><MaterialIcon>shopping_bag</MaterialIcon><span>Varie</span></button>{store === "Viterbo" ? <button className="action-repair" onClick={() => setModal("repair")}><MaterialIcon>footprint</MaterialIcon><span>Risuolatura</span></button> : <button className="action-shirt" onClick={() => setModal("shirt")}><MaterialIcon>checkroom</MaterialIcon><span>Maglie Gran Sasso</span></button>}<button className="action-reservation" onClick={() => setModal("reservation")}><MaterialIcon>calendar_month</MaterialIcon><span>Prenotazione</span></button><button className="action-return" onClick={() => setModal("return")}><MaterialIcon>sync_alt</MaterialIcon><span>Reso / cambio</span></button></div>
+          <CustomerInline data={data} store={store} customer={customer} onSelect={setCustomer} reload={reload} />
+          <div className="actions-strip"><button className="action-gift" onClick={() => setModal("gift")}><MaterialIcon>redeem</MaterialIcon><span>Buono regalo</span></button><button className="action-varie" onClick={() => setModal("varie")}><MaterialIcon>shopping_bag</MaterialIcon><span>Varie</span></button>{store === "Viterbo" ? <button className="action-repair" onClick={() => setModal("repair")}><MaterialIcon>footprint</MaterialIcon><span>Risuolatura</span></button> : <button className="action-shirt" onClick={() => setModal("shirt")}><MaterialIcon>checkroom</MaterialIcon><span>Maglie Gran Sasso</span></button>}<button className="action-reservation" onClick={() => setModal("reservation")}><MaterialIcon>calendar_month</MaterialIcon><span>Prenotazione</span></button><button className="action-return" onClick={() => setModal("return")}><MaterialIcon>sync_alt</MaterialIcon><span>Reso / cambio</span></button></div>
           <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Scansiona un EAN per inserire automaticamente il prodotto.</Empty> : <div className="cart-list">{cart.map((item) => {
   const product = item.productId != null ? data.products.find((p) => p.id === item.productId) : undefined;
   const details = cartDetailLines(item);
@@ -766,7 +791,7 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
           <p className="fine-print">Il bonifico è disponibile soltanto all’amministratore e genera il documento selezionato.</p>
         </aside>
       </div>
-      {modal && <Modal title={modal === "customer" ? "Nuovo cliente" : modal === "gift" ? "Buono regalo" : modal === "repair" ? "Risuolatura multiprodotto" : modal === "reservation" ? "Prenotazione multiprodotto" : modal === "return" ? "Reso o cambio" : modal === "shirt" ? "Maglie Gran Sasso" : "Varie"} onClose={() => setModal(null)}>{modal === "customer" && <CustomerForm store={store} reload={reload} close={() => setModal(null)} />}{modal === "gift" && <GiftForm add={addDraft} close={() => setModal(null)} />}{modal === "varie" && <ServiceForm title="Vendita varie" defaultDescription="Varie" add={addDraft} close={() => setModal(null)} />}{modal === "shirt" && <ServiceForm title="Vendita dedicata Gran Sasso" defaultDescription="Maglie Gran Sasso" add={addDraft} close={() => setModal(null)} />}{modal === "repair" && <DepositForm products={[]} store={store} repair add={addDraft} close={() => setModal(null)} />}{modal === "reservation" && <DepositForm products={data.products} store={store} repair={false} add={addDraft} close={() => setModal(null)} />}{modal === "return" && <ReturnForm store={store} add={addDraft} close={() => setModal(null)} />}</Modal>}
+      {modal && <Modal title={modal === "gift" ? "Buono regalo" : modal === "repair" ? "Risuolatura multiprodotto" : modal === "reservation" ? "Prenotazione multiprodotto" : modal === "return" ? "Reso o cambio" : modal === "shirt" ? "Maglie Gran Sasso" : "Varie"} onClose={() => setModal(null)}>{modal === "gift" && <GiftForm add={addDraft} close={() => setModal(null)} />}{modal === "varie" && <ServiceForm title="Vendita varie" defaultDescription="Varie" add={addDraft} close={() => setModal(null)} />}{modal === "shirt" && <ServiceForm title="Vendita dedicata Gran Sasso" defaultDescription="Maglie Gran Sasso" add={addDraft} close={() => setModal(null)} />}{modal === "repair" && <DepositForm products={[]} store={store} repair add={addDraft} close={() => setModal(null)} />}{modal === "reservation" && <DepositForm products={data.products} store={store} repair={false} add={addDraft} close={() => setModal(null)} />}{modal === "return" && <ReturnForm store={store} add={addDraft} close={() => setModal(null)} />}</Modal>}
       {saleDone && <Modal title="Vendita registrata" guard={false} onClose={() => setSaleDone(null)}><div className="sale-done"><div className="sale-done-icon"><MaterialIcon>check_circle</MaterialIcon></div><h2>Scontrino {saleDone.receiptNo}</h2><div className="sale-done-total"><span>Totale</span><strong>{money(saleDone.total)}</strong></div>{saleDone.cash != null && <><div className="sale-done-row"><span>Contanti ricevuti</span><b>{money(saleDone.cash)}</b></div><div className="sale-done-change"><span>RESTO</span><strong>{money(saleDone.change)}</strong></div></>}<div className="form-actions"><a className="secondary" href={`/api/pdf?type=receipt&id=${saleDone.id}`} target="_blank" rel="noreferrer">Stampa scontrino interno</a><button className="primary" onClick={() => setSaleDone(null)}>Nuova vendita</button></div></div></Modal>}
     </section>
   );
