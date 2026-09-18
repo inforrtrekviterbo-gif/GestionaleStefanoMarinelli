@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 
 type Store = "Viterbo" | "Gran Sasso";
 type User = { role: "admin" | "viterbo" | "gran_sasso"; store: Store | null };
@@ -26,7 +26,7 @@ type Gift = { id: number; issuedSaleId: number };
 type Reservation = { id: number; issuedSaleId: number; kind: string };
 type FiscalDevice = { id: number; store: Store; vendor: string; model: string; enabled: number; hasToken: number; lastSeenAt: string | null; lastStatus: string; lastError: string | null };
 type FiscalJob = { id: number; saleId: number; store: Store; status: string; attempts: number; deviceResponse: string | null; receiptNo: string };
-type CashData = { user: User; products: Product[]; customers: Customer[]; gifts: Gift[]; reservations: Reservation[]; fiscalDevices: FiscalDevice[]; fiscalJobs: FiscalJob[]; generatedAt: string };
+type CashData = { user: User; products: Product[]; customers: Customer[]; gifts: Gift[]; reservations: Reservation[]; fiscalDevices: FiscalDevice[]; fiscalJobs: FiscalJob[]; generatedAt: string; services: { id: number; name: string; price: number; active: number }[] };
 type CartItem = {
   key: string;
   productId: number | null;
@@ -282,6 +282,46 @@ function cartDetailLines(item: CartItem): CartDetailLine[] {
   }).filter((row) => row.description.trim());
 }
 
+// Converte uno sconto in euro (sull'imponibile riga) in percentuale 0..100.
+function euroDiscountToPercent(quantity: number, unitPrice: number, euro: number) {
+  const base = quantity * unitPrice;
+  if (base <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((euro / base) * 10000) / 100));
+}
+// Percentuale -> euro scontati (per mostrare l'importo quando la modalità è €).
+function percentToEuroDiscount(quantity: number, unitPrice: number, percent: number) {
+  return Math.round(quantity * unitPrice * (percent / 100) * 100) / 100;
+}
+
+function CartRow({ item, product, onQty, onDiscountPercent, onRemove }: {
+  item: CartItem;
+  product: Product | undefined;
+  onQty: (quantity: number) => void;
+  onDiscountPercent: (percent: number) => void;
+  onRemove: () => void;
+}) {
+  const [mode, setMode] = useState<"pct" | "eur">("pct");
+  const editable = !item.locked && item.quantity > 0 && !["gift", "deposit", "repair_deposit", "return", "reservation_balance"].includes(item.itemType);
+  const discountValue = mode === "pct" ? item.discountPercent : percentToEuroDiscount(item.quantity, item.unitPrice, item.discountPercent);
+  function applyDiscount(raw: string) {
+    const num = Math.max(0, Number(raw) || 0);
+    onDiscountPercent(mode === "pct" ? Math.min(100, num) : euroDiscountToPercent(item.quantity, item.unitPrice, num));
+  }
+  return <div className={`cart-line ${item.itemType === "return" ? "return-row" : ""}`}>
+    <ProductThumb photoKey={product?.photoKey} name={item.description} className="cart-line-thumb" />
+    <div className="cart-line-main">
+      <strong className="cart-line-name">{item.description}</strong>
+      <small className="cart-line-sub">{money(item.unitPrice)} cad.{item.itemType !== "product" ? ` · ${item.itemType.replaceAll("_", " ")}` : ""}</small>
+    </div>
+    {editable ? <>
+      <div className="qty-stepper"><button type="button" onClick={() => onQty(Math.max(1, item.quantity - 1))} aria-label="Diminuisci">−</button><input type="number" min="1" step="1" value={item.quantity} onChange={(e) => onQty(Math.max(0, Number(e.target.value) || 0))} aria-label="Quantità" /><button type="button" onClick={() => onQty(item.quantity + 1)} aria-label="Aumenta">+</button></div>
+      <div className="disc-field"><input type="number" min="0" step="0.01" value={discountValue} onChange={(e) => applyDiscount(e.target.value)} aria-label="Sconto" /><button type="button" className="disc-toggle" onClick={() => setMode((m) => m === "pct" ? "eur" : "pct")} aria-label="Cambia unità sconto">{mode === "pct" ? "%" : "€"}</button></div>
+    </> : <><span className="cart-line-locked">×{item.quantity}</span><span /></>}
+    <b className="cart-line-total">{money(lineTotal(item))}</b>
+    <button type="button" className="cart-line-remove" onClick={onRemove} aria-label="Rimuovi"><MaterialIcon>delete</MaterialIcon></button>
+  </div>;
+}
+
 function Scanner({ onScan }: { onScan: (code: string) => Promise<void> }) {
   const [code, setCode] = useState("");
   const lastAutomatic = useRef("");
@@ -300,17 +340,36 @@ function Scanner({ onScan }: { onScan: (code: string) => Promise<void> }) {
   return <ClearableInput label="Inserimento EAN" value={code} onChange={change} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void scan(code); } }} placeholder="Scansiona prodotto, buono o acconto…" inputMode="numeric" autoFocus />;
 }
 
-function CustomerForm({ store, reload, close }: { store: Store; reload: () => Promise<void>; close: () => void }) {
-  const [form, setForm] = useState({ firstName: "", lastName: "", phone: "", email: "", address: "", postalCode: "", city: "", province: "", taxCode: "" });
-  const [error, setError] = useState("");
-  const set = (name: keyof typeof form) => (value: string) => setForm((current) => ({ ...current, [name]: value }));
-  async function save(event: React.FormEvent) {
-    event.preventDefault(); setError("");
-    try { await post("createCustomer", { ...form, store }); await reload(); close(); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Errore."); }
-  }
-  return <form className="stack" onSubmit={save}><div className="form-grid"><ClearableInput label="Nome" value={form.firstName} onChange={set("firstName")} required autoFocus /><ClearableInput label="Cognome" value={form.lastName} onChange={set("lastName")} required /><ClearableInput label="Telefono (facoltativo)" value={form.phone} onChange={set("phone")} inputMode="tel" /><ClearableInput label="Email (facoltativa)" type="email" value={form.email} onChange={set("email")} /><ClearableInput className="full" label="Indirizzo (facoltativo)" value={form.address} onChange={set("address")} /><ClearableInput label="CAP" value={form.postalCode} onChange={set("postalCode")} /><ClearableInput label="Comune" value={form.city} onChange={set("city")} /><ClearableInput label="Provincia" value={form.province} onChange={set("province")} maxLength={2} /><ClearableInput className="full" label="Codice fiscale (utile per la garanzia)" value={form.taxCode} onChange={set("taxCode")} />{error && <div className="alert danger full">{error}</div>}<div className="form-actions full"><button type="button" className="secondary" onClick={close}>Annulla</button><button className="primary">Salva cliente</button></div></div></form>;
+// Riconosce lo "sparo" dello scanner (tasti velocissimi + Enter) da qualunque
+// punto della pagina. La digitazione lenta a mano non viene intercettata.
+function useGlobalScanner(onScan: (code: string) => void) {
+  useEffect(() => {
+    let buffer = "";
+    let lastTime = 0;
+    const MAX_GAP = 50; // ms tra due tasti dello scanner
+    const MIN_LEN = 6;  // lunghezza minima per considerarlo un codice
+    function onKeyDown(event: KeyboardEvent) {
+      // Se il focus è in un campo di testo (EAN, ricerca, form) lasciamo gestire
+      // a quel campo: evita doppie letture e caratteri "sporchi" negli input.
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      const now = event.timeStamp;
+      if (now - lastTime > MAX_GAP) buffer = "";
+      lastTime = now;
+      if (event.key === "Enter") {
+        const code = buffer;
+        buffer = "";
+        if (code.length >= MIN_LEN) { event.preventDefault(); onScan(code); }
+        return;
+      }
+      if (event.key.length === 1) buffer += event.key;
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onScan]);
 }
+
 function GiftForm({ add, close }: { add: (item: CartItem) => void; close: () => void }) {
   const [beneficiary, setBeneficiary] = useState("");
   const [amount, setAmount] = useState("");
@@ -462,13 +521,89 @@ function ProductThumb({ photoKey, name, className = "" }: { photoKey: string | n
   return <div className={`${className} thumb-ph`} aria-hidden="true"><span>{initials}</span></div>;
 }
 
+function CashSearch({ products, services, available, onProduct, onService }: {
+  products: Product[];
+  services: { id: number; name: string; price: number; active: number }[];
+  available: (product: Product) => number;
+  onProduct: (product: Product) => void;
+  onService: (service: { id: number; name: string; price: number }) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLocaleLowerCase("it");
+  const prodMatches = q ? products.filter((p) => available(p) > 0 && `${p.brand} ${p.name} ${p.color} ${p.size} ${p.sku} ${p.eans}`.toLocaleLowerCase("it").includes(q)).slice(0, 40) : [];
+  const svcMatches = q ? (services ?? []).filter((s) => s.active && s.name.toLocaleLowerCase("it").includes(q)).slice(0, 20) : [];
+  return <div className="cash-search">
+    <div className="search-hero"><MaterialIcon>search</MaterialIcon><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cerca prodotto o servizio per nome, colore, taglia, SKU…" /></div>
+    {q && <div className="cash-search-results">
+      {!prodMatches.length && !svcMatches.length ? <Empty>Nessun risultato.</Empty> : <>
+        {prodMatches.map((p) => <button type="button" className="cash-result" key={`p-${p.id}`} onClick={() => { onProduct(p); setQuery(""); }}><span><strong>{p.name}</strong><small>{p.brand} · {p.color} · {p.size} · {available(p)} pz</small></span><b>{money(p.price)}</b></button>)}
+        {svcMatches.map((s) => <button type="button" className="cash-result service" key={`s-${s.id}`} onClick={() => { onService(s); setQuery(""); }}><span><strong>{s.name}</strong><small>Servizio</small></span><b>{money(s.price)}</b></button>)}
+      </>}
+    </div>}
+  </div>;
+}
+
+function CustomerInline({ data, store, customer, onSelect, reload }: {
+  data: CashData;
+  store: Store;
+  customer: Customer | null;
+  onSelect: (customer: Customer | null) => void;
+  reload: () => Promise<void>;
+}) {
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const q = query.trim().toLocaleLowerCase("it");
+  const matches = q ? data.customers.filter((c) => `${customerLabel(c)} ${c.phone}`.toLocaleLowerCase("it").includes(q)).slice(0, 6) : [];
+  // Serve Nome E Cognome (almeno due parole): il server esige entrambi.
+  const hasFullName = query.trim().split(/\s+/).length >= 2;
+  const canCreate = hasFullName && !matches.some((c) => customerLabel(c).toLocaleLowerCase("it") === q);
+  async function create() {
+    setError("");
+    const tokens = query.trim().split(/\s+/);
+    const lastName = tokens[tokens.length - 1];
+    const firstName = tokens.slice(0, -1).join(" ");
+    setBusy(true);
+    try {
+      const result = await post("createCustomer", { firstName, lastName, store });
+      await reload();
+      if (result?.customer) onSelect(result.customer as Customer);
+      setQuery("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Errore."); }
+    finally { setBusy(false); }
+  }
+  if (customer) return <div className="customer-chip"><MaterialIcon>person</MaterialIcon><span>{customerLabel(customer)}</span><button type="button" onClick={() => onSelect(null)} aria-label="Rimuovi cliente"><MaterialIcon>close</MaterialIcon></button></div>;
+  return <div className="customer-inline">
+    <div className="customer-inline-field"><MaterialIcon>person_search</MaterialIcon><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Associa cliente: Nome Cognome…" /></div>
+    {q && <div className="customer-inline-drop">
+      {matches.map((c) => <button type="button" key={c.id} onClick={() => { onSelect(c); setQuery(""); }}><strong>{customerLabel(c)}</strong><small>{c.phone || c.city || "—"}</small></button>)}
+      {canCreate && <button type="button" className="create" disabled={busy} onClick={create}><MaterialIcon>add</MaterialIcon> Crea "{query.trim()}"</button>}
+      {error && <div className="alert danger">{error}</div>}
+    </div>}
+  </div>;
+}
+
+function OperationsMenu({ store, onPick }: { store: Store; onPick: (modal: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const items: [string, string, string][] = [
+    ["gift", "redeem", "Buono regalo"],
+    ["varie", "shopping_bag", "Varie"],
+    ["reservation", "calendar_month", "Prenotazione"],
+    ["return", "sync_alt", "Reso / Cambio"],
+    store === "Viterbo" ? ["repair", "footprint", "Risuolatura"] : ["shirt", "checkroom", "Maglie Gran Sasso"],
+  ];
+  return <div className="ops-menu">
+    {open && <button className="ops-backdrop" aria-label="Chiudi" onClick={() => setOpen(false)} />}
+    <button type="button" className="secondary" onClick={() => setOpen((v) => !v)}><MaterialIcon>bolt</MaterialIcon> Operazioni <MaterialIcon>{open ? "expand_less" : "expand_more"}</MaterialIcon></button>
+    {open && <div className="ops-dropdown">{items.map(([key, icon, label]) => <button type="button" key={key} onClick={() => { onPick(key); setOpen(false); }}><MaterialIcon>{icon}</MaterialIcon> {label}</button>)}</div>}
+  </div>;
+}
+
 export default function CashRegister({ data, reload, queue, onQueueConsumed }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void }) {
   const [adminStore, setAdminStore] = useState<Store>("Viterbo");
   const store = data.user.store ?? adminStore;
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [prodQuery, setProdQuery] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [customerQuery, setCustomerQuery] = useState("");
   const [modal, setModal] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -493,7 +628,6 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
   const exchangePurchase = Math.round(cart.filter((item) => item.itemType !== "return").reduce((sum, item) => sum + lineTotal(item), 0) * 100) / 100;
   const hasGiftOriginReturn = cart.some((item) => item.itemType === "return" && Boolean(item.metadata.originalGiftCode));
   const createsResidualGift = hasGiftOriginReturn && total < -0.001;
-  const customerMatches = useMemo(() => { const query = customerQuery.trim().toLocaleLowerCase("it"); return query ? data.customers.filter((item) => `${customerLabel(item)} ${item.vatNumber}`.toLocaleLowerCase("it").includes(query)).slice(0, 8) : []; }, [data.customers, customerQuery]);
   const fiscalDevice = data.fiscalDevices.find((device) => device.store === store);
   const fiscalRecent = Boolean(fiscalDevice?.enabled && fiscalDevice.lastSeenAt && new Date(data.generatedAt).getTime() - new Date(fiscalDevice.lastSeenAt).getTime() < 15000);
   const fiscalOnline = Boolean(fiscalRecent && fiscalDevice?.lastStatus === "online");
@@ -524,6 +658,11 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
     setTotalOverride(""); setError(""); setNotice(`${product.name} aggiunto automaticamente al carrello.`);
   }
 
+  function addService(service: { id: number; name: string; price: number }) {
+    setCart((current) => [...current, { key: keyId(), productId: null, description: service.name, quantity: 1, unitPrice: service.price, discountPercent: 0, itemType: "service", metadata: { serviceId: service.id } }]);
+    setTotalOverride(""); setError(""); setNotice(`${service.name} aggiunto al carrello.`);
+  }
+
   // Drena la coda "aggiungi alla vendita" arrivata da scansioni fuori dalla cassa.
   useEffect(() => {
     if (!queue?.length) return;
@@ -534,13 +673,6 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
 
   function addDraft(item: CartItem) { setCart((current) => [...current, item]); setTotalOverride(""); setModal(null); }
   function updateItem(key: string, change: Partial<CartItem>) { setCart((current) => current.map((item) => item.key === key ? { ...item, ...change } : item)); setTotalOverride(""); }
-  function updateItemTotal(item: CartItem, value: string) {
-    const base = item.quantity * item.unitPrice;
-    if (base <= 0) return;
-    const requested = Math.min(base, Math.max(0, Number(value) || 0));
-    const discountPercent = Math.round((1 - requested / base) * 10000) / 100;
-    updateItem(item.key, { discountPercent });
-  }
   function removeItem(key: string) { setCart((current) => current.filter((item) => item.key !== key)); setTotalOverride(""); }
 
   async function scan(code: string) {
@@ -564,6 +696,11 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       }
     } catch (reason) { setError(reason instanceof Error ? reason.message : "EAN non riconosciuto."); }
   }
+
+  const scanRef = useRef(scan);
+  scanRef.current = scan;
+  const onGlobalScan = useCallback((code: string) => { void scanRef.current(code); }, []);
+  useGlobalScanner(onGlobalScan);
 
   function payments() {
     if (createsResidualGift) return { cashAmount: 0, cardAmount: 0, bankAmount: 0, giftAmount: total, giftCodeUsed: "" };
@@ -602,7 +739,7 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       const changeDue = payment === "cash" && !hasReturn ? Math.max(0, (Number(cashReceived) || 0) - total) : 0;
       setLastSale({ id: result.saleId, receiptNo: result.receiptNo, automaticFiscalDocument: result.automaticFiscalDocument ?? null, invoiceDocument: result.invoiceDocument ?? null, fiscalJob: result.fiscalJob ?? null, replacementGift: result.replacementGift ?? null });
       setSaleDone({ id: result.saleId, receiptNo: result.receiptNo, total, cash: payment === "cash" && !hasReturn ? (Number(cashReceived) || 0) : null, change: changeDue });
-      setCart([]); setCartDiscount(""); setTotalOverride(""); setCashAmount(""); setCashReceived(""); setCardAmount(""); setGiftAmount(""); setGiftCode(""); setCustomer(null); setCustomerQuery(""); setPayment("cash"); setFiscalDocumentType("receipt");
+      setCart([]); setCartDiscount(""); setTotalOverride(""); setCashAmount(""); setCashReceived(""); setCardAmount(""); setGiftAmount(""); setGiftCode(""); setCustomer(null); setPayment("cash"); setFiscalDocumentType("receipt");
       setNotice(hasReturn ? `Cambio ${result.receiptNo} registrato. ${result.replacementGift ? `Buono precedente stornato: nuovo buono da ${money(result.replacementGift.value)} intestato a ${result.replacementGift.beneficiary}.` : total > 0 ? `Differenza incassata: ${money(total)}.` : total < 0 ? `Rimborso registrato: ${money(Math.abs(total))}.` : "Cambio alla pari."} ${fiscalMessage}` : payment === "bank" ? `Vendita ${result.receiptNo} registrata con bonifico. ${result.invoiceDocument ? `Fattura ${result.invoiceDocument.number} generata automaticamente.` : fiscalMessage}` : `Vendita ${result.receiptNo} registrata. ${fiscalMessage}`);
       if (fiscalError) setError(fiscalError);
       await reload();
@@ -646,14 +783,25 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       {error && <div className="alert danger visual-alert"><MaterialIcon>warning</MaterialIcon>{error}</div>}
       <div className="cash-grid">
         <div className="cash-main">
-          <div className="panel scanner-panel"><div className="scanner-panel-head"><p className="eyebrow">SCANNER</p><Scanner onScan={scan} /></div><div className="search-hero"><MaterialIcon>search</MaterialIcon><input value={prodQuery} onChange={(event) => setProdQuery(event.target.value)} placeholder="Cerca prodotto per nome, colore, taglia, SKU…" /></div>{(() => {
-            const q = prodQuery.trim().toLocaleLowerCase("it");
-            const list = data.products.filter((p) => available(p) > 0 && (!q || `${p.brand} ${p.name} ${p.color} ${p.size} ${p.sku} ${p.eans}`.toLocaleLowerCase("it").includes(q))).sort((a, b) => `${a.name} ${a.color}`.localeCompare(`${b.name} ${b.color}`, "it")).slice(0, 60);
-            return list.length ? <div className="cash-product-grid">{list.map((p) => <button type="button" className="cash-prod-card" key={p.id} onClick={() => addProduct(p)}><ProductThumb photoKey={p.photoKey} name={p.name} className="cpc-thumb" /><span className="cpc-name">{p.name}</span><span className="cpc-var">{p.color} · {p.size}</span><span className="cpc-foot"><b>{money(p.price)}</b><small>{available(p)} pz</small></span></button>)}</div> : <Empty>{q ? "Nessun prodotto trovato." : "Nessun prodotto disponibile in questo negozio."}</Empty>;
-          })()}</div>
-          <div className="panel"><div className="panel-title"><div><p className="eyebrow">CLIENTE</p><h2>{customer ? customerLabel(customer) : "Associa cliente o azienda"}</h2></div>{customer && <button className="text-button" onClick={() => setCustomer(null)}>Rimuovi</button>}</div><ClearableInput value={customerQuery} onChange={setCustomerQuery} placeholder="Nome, società o P.IVA…" />{customerMatches.length > 0 && <div className="customer-dropdown">{customerMatches.map((item) => <button key={item.id} onClick={() => { setCustomer(item); setCustomerQuery(""); }}><strong>{customerLabel(item)}</strong><small>{item.vatNumber || item.city || item.phone || item.scope}</small></button>)}</div>}</div>
-          <div className="actions-strip"><button className="action-customer" onClick={() => setModal("customer")}><MaterialIcon>person_add</MaterialIcon><span>Nuovo cliente</span></button><button className="action-gift" onClick={() => setModal("gift")}><MaterialIcon>redeem</MaterialIcon><span>Buono regalo</span></button><button className="action-varie" onClick={() => setModal("varie")}><MaterialIcon>shopping_bag</MaterialIcon><span>Varie</span></button>{store === "Viterbo" ? <button className="action-repair" onClick={() => setModal("repair")}><MaterialIcon>footprint</MaterialIcon><span>Risuolatura</span></button> : <button className="action-shirt" onClick={() => setModal("shirt")}><MaterialIcon>checkroom</MaterialIcon><span>Maglie Gran Sasso</span></button>}<button className="action-reservation" onClick={() => setModal("reservation")}><MaterialIcon>calendar_month</MaterialIcon><span>Prenotazione</span></button><button className="action-return" onClick={() => setModal("return")}><MaterialIcon>sync_alt</MaterialIcon><span>Reso / cambio</span></button></div>
-          <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Scansiona un EAN per inserire automaticamente il prodotto.</Empty> : <><div className="cart-header"><span>Prodotto</span><span>Qtà</span><span>Prezzo vendita</span><span>Sconto %</span><span>Totale modificabile</span><span /></div><div className="cart-list">{cart.map((item) => { const details = cartDetailLines(item); const editableTotal = !item.locked && item.quantity > 0 && !["gift", "deposit", "repair_deposit"].includes(item.itemType); return <div className={`cart-row cash-cart-row ${item.itemType === "return" ? "return-row" : ""}`} key={item.key}><div className="cart-desc"><strong>{item.description}</strong><small>{item.itemType.replaceAll("_", " ")}</small></div><ClearableInput compact aria-label="Quantità" type="number" step="1" value={item.quantity} onChange={(value) => updateItem(item.key, { quantity: Number(value) || 0 })} disabled={item.locked} /><ClearableInput compact aria-label="Prezzo di vendita unitario" type="number" step="0.01" value={item.unitPrice} onChange={(value) => updateItem(item.key, { unitPrice: Number(value) || 0 })} disabled={item.locked} /><ClearableInput compact aria-label="Sconto percentuale" type="number" min="0" max="100" step="0.01" value={item.discountPercent} onChange={(value) => updateItem(item.key, { discountPercent: Math.min(100, Math.max(0, Number(value) || 0)) })} disabled={item.locked} />{editableTotal ? <ClearableInput compact aria-label="Importo totale prodotto" type="number" min="0" max={item.quantity * item.unitPrice} step="0.01" value={lineTotal(item)} onChange={(value) => updateItemTotal(item, value)} /> : <b>{money(lineTotal(item))}</b>}<button className="icon-button" onClick={() => removeItem(item.key)}><MaterialIcon>close</MaterialIcon></button>{details.length > 0 && <div className="cart-subitems"><div className="cart-subitems-head"><span>Dettaglio prodotti</span><span>Qtà</span><span>Costo</span></div>{details.map((detail, index) => <div className="cart-subitem" key={`${item.key}-detail-${index}`}><span>{detail.description}</span><span>{detail.quantity}</span><b>{money(detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100))}</b></div>)}<div className="cart-subitems-total"><span>Totale operazione</span><b>{money(Number(item.metadata.totalPrice) || details.reduce((sum, detail) => sum + detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100), 0))}</b></div></div>}</div>; })}</div></>}</div>
+          <div className="panel scanner-panel">
+            <div className="scanner-panel-head"><p className="eyebrow">SCANNER</p><Scanner onScan={scan} /></div>
+            <CashSearch products={data.products} services={data.services} available={available} onProduct={addProduct} onService={addService} />
+          </div>
+          <div className="cash-subbar">
+            <CustomerInline data={data} store={store} customer={customer} onSelect={setCustomer} reload={reload} />
+            <OperationsMenu store={store} onPick={setModal} />
+          </div>
+          <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Spara un codice o cerca un prodotto per iniziare.</Empty> : <div className="cart-list">{cart.map((item) => {
+  const product = item.productId != null ? data.products.find((p) => p.id === item.productId) : undefined;
+  const details = cartDetailLines(item);
+  return <Fragment key={item.key}>
+    <CartRow item={item} product={product}
+      onQty={(quantity) => updateItem(item.key, { quantity })}
+      onDiscountPercent={(percent) => updateItem(item.key, { discountPercent: percent })}
+      onRemove={() => removeItem(item.key)} />
+    {details.length > 0 && <div className="cart-subitems"><div className="cart-subitems-head"><span>Dettaglio prodotti</span><span>Qtà</span><span>Costo</span></div>{details.map((detail, index) => <div className="cart-subitem" key={`${item.key}-detail-${index}`}><span>{detail.description}</span><span>{detail.quantity}</span><b>{money(detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100))}</b></div>)}<div className="cart-subitems-total"><span>Totale operazione</span><b>{money(Number(item.metadata.totalPrice) || details.reduce((sum, detail) => sum + detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100), 0))}</b></div></div>}
+  </Fragment>;
+})}</div>}</div>
         </div>
         <aside className="checkout">
           <div><p className="eyebrow">RIEPILOGO</p>{hasReturn && <div className="exchange-summary"><div><span>Valore reso</span><b>− {money(returnCredit)}</b></div><div><span>Nuovi articoli</span><b>{money(exchangePurchase)}</b></div><div className={total < 0 ? "refund" : "difference"}><span>{total > 0 ? "Differenza da incassare" : total < 0 ? createsResidualGift ? "Credito su nuovo buono" : "Rimborso al cliente" : "Cambio alla pari"}</span><strong>{money(Math.abs(total))}</strong></div></div>}<div className="total-line"><span>Prezzo prima degli sconti</span><b>{money(priceBeforeDiscounts)}</b></div><div className="total-line"><span>Dopo sconti prodotti</span><b>{money(subtotal)}</b></div><ClearableInput label="Sconto totale carrello %" type="number" min="0" max="100" step="0.01" value={cartDiscount} onChange={(value) => { setCartDiscount(value); setTotalOverride(""); }} /><ClearableInput label="Totale carrello modificabile" type="number" step="0.01" value={totalOverride} onChange={setTotalOverride} placeholder={totalAfterCartDiscount.toFixed(2)} /><div className="grand-total"><span>{hasReturn ? "Differenza finale" : "Totale"}</span><strong>{money(total)}</strong></div></div>
@@ -663,7 +811,7 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
           <p className="fine-print">Il bonifico è disponibile soltanto all’amministratore e genera il documento selezionato.</p>
         </aside>
       </div>
-      {modal && <Modal title={modal === "customer" ? "Nuovo cliente" : modal === "gift" ? "Buono regalo" : modal === "repair" ? "Risuolatura multiprodotto" : modal === "reservation" ? "Prenotazione multiprodotto" : modal === "return" ? "Reso o cambio" : modal === "shirt" ? "Maglie Gran Sasso" : "Varie"} onClose={() => setModal(null)}>{modal === "customer" && <CustomerForm store={store} reload={reload} close={() => setModal(null)} />}{modal === "gift" && <GiftForm add={addDraft} close={() => setModal(null)} />}{modal === "varie" && <ServiceForm title="Vendita varie" defaultDescription="Varie" add={addDraft} close={() => setModal(null)} />}{modal === "shirt" && <ServiceForm title="Vendita dedicata Gran Sasso" defaultDescription="Maglie Gran Sasso" add={addDraft} close={() => setModal(null)} />}{modal === "repair" && <DepositForm products={[]} store={store} repair add={addDraft} close={() => setModal(null)} />}{modal === "reservation" && <DepositForm products={data.products} store={store} repair={false} add={addDraft} close={() => setModal(null)} />}{modal === "return" && <ReturnForm store={store} add={addDraft} close={() => setModal(null)} />}</Modal>}
+      {modal && <Modal title={modal === "gift" ? "Buono regalo" : modal === "repair" ? "Risuolatura multiprodotto" : modal === "reservation" ? "Prenotazione multiprodotto" : modal === "return" ? "Reso o cambio" : modal === "shirt" ? "Maglie Gran Sasso" : "Varie"} onClose={() => setModal(null)}>{modal === "gift" && <GiftForm add={addDraft} close={() => setModal(null)} />}{modal === "varie" && <ServiceForm title="Vendita varie" defaultDescription="Varie" add={addDraft} close={() => setModal(null)} />}{modal === "shirt" && <ServiceForm title="Vendita dedicata Gran Sasso" defaultDescription="Maglie Gran Sasso" add={addDraft} close={() => setModal(null)} />}{modal === "repair" && <DepositForm products={[]} store={store} repair add={addDraft} close={() => setModal(null)} />}{modal === "reservation" && <DepositForm products={data.products} store={store} repair={false} add={addDraft} close={() => setModal(null)} />}{modal === "return" && <ReturnForm store={store} add={addDraft} close={() => setModal(null)} />}</Modal>}
       {saleDone && <Modal title="Vendita registrata" guard={false} onClose={() => setSaleDone(null)}><div className="sale-done"><div className="sale-done-icon"><MaterialIcon>check_circle</MaterialIcon></div><h2>Scontrino {saleDone.receiptNo}</h2><div className="sale-done-total"><span>Totale</span><strong>{money(saleDone.total)}</strong></div>{saleDone.cash != null && <><div className="sale-done-row"><span>Contanti ricevuti</span><b>{money(saleDone.cash)}</b></div><div className="sale-done-change"><span>RESTO</span><strong>{money(saleDone.change)}</strong></div></>}<div className="form-actions"><a className="secondary" href={`/api/pdf?type=receipt&id=${saleDone.id}`} target="_blank" rel="noreferrer">Stampa scontrino interno</a><button className="primary" onClick={() => setSaleDone(null)}>Nuova vendita</button></div></div></Modal>}
     </section>
   );
