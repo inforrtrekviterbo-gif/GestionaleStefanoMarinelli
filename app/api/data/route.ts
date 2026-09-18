@@ -545,9 +545,9 @@ async function updateGift(user: SessionUser, body: JsonMap) {
   const balance = Math.round(Math.max(0, numberValue(body.balance)) * 100) / 100;
   const expiresAt = stringValue(body.expiresAt);
   const requestedStatus = stringValue(body.status);
-  if (!beneficiary || initialValue <= 0 || balance > initialValue || !/^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) return json({ error: "Controlla intestatario, valori e data di scadenza." }, 400);
+  if (!beneficiary || initialValue <= 0 || balance > initialValue || (expiresAt && !/^\d{4}-\d{2}-\d{2}$/.test(expiresAt))) return json({ error: "Controlla intestatario, valori e data di scadenza." }, 400);
   const status = requestedStatus === "reversed" ? "reversed" : balance <= 0 ? "used" : requestedStatus === "expired" ? "expired" : "active";
-  const result = await database().prepare(`UPDATE gift_cards SET beneficiary = ?, initial_value = ?, balance = ?, expires_at = ?, status = ? WHERE id = ? AND status <> 'deleted'`).bind(beneficiary, initialValue, balance, expiresAt, status, giftId).run();
+  const result = await database().prepare(`UPDATE gift_cards SET beneficiary = ?, initial_value = ?, balance = ?, expires_at = ?, status = ? WHERE id = ? AND status <> 'deleted'`).bind(beneficiary, initialValue, balance, expiresAt || null, status, giftId).run();
   if (!result.meta?.changes) return json({ error: "Buono non trovato." }, 404);
   return json({ ok: true });
 }
@@ -559,6 +559,24 @@ async function deleteGift(user: SessionUser, body: JsonMap) {
   if (!result.meta?.changes) return json({ error: "Buono non trovato." }, 404);
   await logActivity({ user, action: "delete", entity: "gift", entityId: giftId });
   return json({ ok: true });
+}
+
+async function createGift(user: SessionUser, body: JsonMap) {
+  const denied = adminOnly(user); if (denied) return denied;
+  const beneficiary = stringValue(body.beneficiary).trim();
+  const value = Math.round(Math.max(0, numberValue(body.value)) * 100) / 100;
+  const expiresAt = stringValue(body.expiresAt).trim();
+  const store = validStore(body.store) ? body.store : (user.store ?? "Viterbo");
+  if (!beneficiary || value <= 0) return json({ error: "Inserisci intestatario e importo del buono." }, 400);
+  if (expiresAt && !/^\d{4}-\d{2}-\d{2}$/.test(expiresAt)) return json({ error: "Data di scadenza non valida." }, 400);
+  const code = ean13();
+  const now = new Date().toISOString();
+  const result = await database().prepare(`INSERT INTO gift_cards (code, beneficiary, initial_value, balance, expires_at, store, issued_sale_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, 'active', ?)`)
+    .bind(code, beneficiary, value, value, expiresAt || null, store, now).run();
+  const id = Number(result.meta?.last_row_id);
+  if (!id) return json({ error: "Buono non registrato." }, 500);
+  await logActivity({ user, action: "create", entity: "gift", entityId: id, detail: `Buono ${code} · ${beneficiary} · €${value.toFixed(2)}`, store });
+  return json({ ok: true, id, code });
 }
 
 async function adjustReservationStock(reservationId: number, store: Store, direction: 1 | -1) {
@@ -761,7 +779,7 @@ async function createSale(user: SessionUser, body: JsonMap) {
 
   if (giftAmount > 0) {
     const gift = await database().prepare(`SELECT balance, expires_at AS expiresAt, status FROM gift_cards WHERE code = ?`).bind(giftCodeUsed).first<{ balance: number; expiresAt: string; status: string }>();
-    if (!gift || gift.status !== "active" || new Date(gift.expiresAt) < new Date() || gift.balance + 0.001 < giftAmount) return json({ error: "Buono non valido o saldo insufficiente." }, 400);
+    if (!gift || gift.status !== "active" || (gift.expiresAt && new Date(gift.expiresAt) < new Date()) || gift.balance + 0.001 < giftAmount) return json({ error: "Buono non valido o saldo insufficiente." }, 400);
   }
 
   const receiptNo = idCode(store === "Viterbo" ? "VT" : "GS");
@@ -1168,7 +1186,8 @@ async function postImpl(request: Request) {
     if (action === "createCustomer") return createCustomer(auth.user, body);
     if (action === "updateCustomer") return updateCustomer(auth.user, body);
     if (action === "deleteCustomer") return deleteCustomer(auth.user, body);
-    if (action === "saveReorderSettings") return saveReorderSettings(auth.user, body);
+    if (action === "createGift") return createGift(auth.user, body);
+  if (action === "saveReorderSettings") return saveReorderSettings(auth.user, body);
   if (action === "createService") return createService(auth.user, body);
     if (action === "updateService") return updateService(auth.user, body);
     if (action === "deleteService") return deleteService(auth.user, body);

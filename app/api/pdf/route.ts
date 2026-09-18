@@ -56,7 +56,7 @@ async function getImpl(request: Request) {
     if (user.role !== "admin" && gift.store !== user.store) return json({ error: "Documento non disponibile per questa cassa." }, 403);
     return pdfResponse(createPdf({
       title: "Buono regalo",
-      lines: [`Valore: ${euro(gift.initialValue)}`, `Intestatario: ${gift.beneficiary}`, `Scadenza: ${new Date(gift.expiresAt).toLocaleDateString("it-IT")}`, `Emesso da: ${gift.store}`, `Saldo attuale: ${euro(gift.balance)}`, "Presentare il codice alla cassa."],
+      lines: [`Valore: ${euro(gift.initialValue)}`, `Intestatario: ${gift.beneficiary}`, `Scadenza: ${gift.expiresAt ? new Date(gift.expiresAt).toLocaleDateString("it-IT") : "Nessuna"}`, `Emesso da: ${gift.store}`, `Saldo attuale: ${euro(gift.balance)}`, "Presentare il codice alla cassa."],
       barcode: gift.code,
     }), `buono-${gift.code}.pdf`);
   }
