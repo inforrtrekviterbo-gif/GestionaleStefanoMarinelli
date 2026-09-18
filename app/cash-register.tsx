@@ -785,9 +785,11 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
             <div className="scanner-panel-head"><p className="eyebrow">SCANNER</p><Scanner onScan={scan} /></div>
             <CashSearch products={data.products} services={data.services} available={available} onProduct={addProduct} onService={addService} />
           </div>
-          <CustomerInline data={data} store={store} customer={customer} onSelect={setCustomer} reload={reload} />
-          <OperationsMenu store={store} onPick={setModal} />
-          <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Scansiona un EAN per inserire automaticamente il prodotto.</Empty> : <div className="cart-list">{cart.map((item) => {
+          <div className="cash-subbar">
+            <CustomerInline data={data} store={store} customer={customer} onSelect={setCustomer} reload={reload} />
+            <OperationsMenu store={store} onPick={setModal} />
+          </div>
+          <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Spara un codice o cerca un prodotto per iniziare.</Empty> : <div className="cart-list">{cart.map((item) => {
   const product = item.productId != null ? data.products.find((p) => p.id === item.productId) : undefined;
   const details = cartDetailLines(item);
   return <Fragment key={item.key}>

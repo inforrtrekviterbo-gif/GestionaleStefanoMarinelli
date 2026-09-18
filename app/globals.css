@@ -183,12 +183,13 @@ small { color: var(--ink-soft); }
 .visual-alert { font-size: 1rem; box-shadow: 0 8px 24px rgba(165,50,43,.12); }
 .empty { min-height: 115px; display: grid; place-items: center; padding: 1rem; color: var(--ink-soft); text-align: center; border: 1px dashed #2d4b59; border-radius: 15px; background: rgba(66,199,255,.05); }
 
-.cash-grid { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 1rem; align-items: start; }
-.cash-main { min-width: 0; }
+.cash-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 1.1rem; align-items: start; }
+.cash-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.cash-subbar { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
 .scanner-panel { display: grid; grid-template-columns: minmax(0, .9fr) minmax(280px, 1.1fr); align-items: end; gap: 1rem; }
 .scanner-panel h2 { margin-bottom: .35rem; }
 .scanner-panel .field { align-self: end; }
-.checkout { position: sticky; top: 1rem; display: grid; gap: 1.25rem; padding: 1.25rem; border: 1px solid rgba(66,199,255,.18); border-radius: 22px; background: #020405; color: white; box-shadow: 0 20px 45px rgba(0,0,0,.4); }
+.checkout { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem; padding: 1.25rem; border: 1px solid rgba(66,199,255,.18); border-radius: 22px; background: #020405; color: white; box-shadow: 0 20px 45px rgba(0,0,0,.4); }
 .checkout .eyebrow, .checkout .field > span:first-child { color: var(--lime); }
 .checkout .total-line { display: flex; justify-content: space-between; margin-bottom: .8rem; color: rgba(255,255,255,.68); }
 .grand-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,.15); }
@@ -527,12 +528,11 @@ td small { margin-top: .16rem; font-size: .62rem; }
   .app-shell { grid-template-columns: 220px minmax(0,1fr); }
   .metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .report-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .cash-grid { grid-template-columns: 1fr; }
-  .checkout { position: static; }
   .actions-strip { grid-template-columns: repeat(3,1fr); }
   .fiscal-device-grid { grid-template-columns: 1fr; }
   .reorder-filters { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }
+@media (max-width: 900px) { .cash-grid { grid-template-columns: 1fr; } .checkout { position: static; } }
 
 @media (max-width: 800px) {
   .app-shell { display: block; }
