@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
 
 type Store = "Viterbo" | "Gran Sasso";
 type User = { role: "admin" | "viterbo" | "gran_sasso"; store: Store | null };
@@ -300,6 +300,31 @@ function Scanner({ onScan }: { onScan: (code: string) => Promise<void> }) {
   return <ClearableInput label="Inserimento EAN" value={code} onChange={change} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void scan(code); } }} placeholder="Scansiona prodotto, buono o acconto…" inputMode="numeric" autoFocus />;
 }
 
+// Riconosce lo "sparo" dello scanner (tasti velocissimi + Enter) da qualunque
+// punto della pagina. La digitazione lenta a mano non viene intercettata.
+function useGlobalScanner(onScan: (code: string) => void) {
+  useEffect(() => {
+    let buffer = "";
+    let lastTime = 0;
+    const MAX_GAP = 50; // ms tra due tasti dello scanner
+    const MIN_LEN = 6;  // lunghezza minima per considerarlo un codice
+    function onKeyDown(event: KeyboardEvent) {
+      const now = event.timeStamp;
+      if (now - lastTime > MAX_GAP) buffer = "";
+      lastTime = now;
+      if (event.key === "Enter") {
+        const code = buffer;
+        buffer = "";
+        if (code.length >= MIN_LEN) { event.preventDefault(); onScan(code); }
+        return;
+      }
+      if (event.key.length === 1) buffer += event.key;
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onScan]);
+}
+
 function CustomerForm({ store, reload, close }: { store: Store; reload: () => Promise<void>; close: () => void }) {
   const [form, setForm] = useState({ firstName: "", lastName: "", phone: "", email: "", address: "", postalCode: "", city: "", province: "", taxCode: "" });
   const [error, setError] = useState("");
@@ -564,6 +589,11 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       }
     } catch (reason) { setError(reason instanceof Error ? reason.message : "EAN non riconosciuto."); }
   }
+
+  const scanRef = useRef(scan);
+  scanRef.current = scan;
+  const onGlobalScan = useCallback((code: string) => { void scanRef.current(code); }, []);
+  useGlobalScanner(onGlobalScan);
 
   function payments() {
     if (createsResidualGift) return { cashAmount: 0, cardAmount: 0, bankAmount: 0, giftAmount: total, giftCodeUsed: "" };
