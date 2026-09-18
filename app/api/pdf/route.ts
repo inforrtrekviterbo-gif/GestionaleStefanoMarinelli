@@ -39,9 +39,9 @@ async function getImpl(request: Request) {
       `Cliente: ${sale.customerName}`,
       `Numero vendita: ${sale.receiptNo}`,
       "------------------------------------------------------------",
-      ...items.map((item) => `${item.quantity} x ${item.description.slice(0, 42)}  ${euro(item.lineTotal)}`),
+      ...items.map((item) => `${item.quantity} x ${item.description.slice(0, 46)}\t${euro(item.lineTotal)}`),
       "------------------------------------------------------------",
-      `TOTALE: ${euro(sale.total)}`,
+      `TOTALE\t${euro(sale.total)}`,
       `Contanti: ${euro(sale.cashAmount)}   Carta: ${euro(sale.cardAmount)}   Bonifico: ${euro(sale.bankAmount)}   Buono: ${euro(sale.giftAmount)}`,
       type === "courtesy" ? "Documento di cortesia senza indicazione dei prezzi fiscali." : type === "fiscal-receipt" ? "Scontrino generato automaticamente per incasso tramite bonifico bancario." : "Ristampa interna di una vendita gia effettuata.",
     ];
