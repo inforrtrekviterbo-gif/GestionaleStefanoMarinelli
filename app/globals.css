@@ -893,3 +893,11 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .cart-line-remove { width: 36px; height: 36px; border-radius: 10px; border: 0; background: rgba(255,138,156,.14); color: #ff8a9c; display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
 .cart-line-locked { min-width: 92px; text-align: center; color: var(--muted, #8aa0b5); font-weight: 700; }
 @media (max-width: 720px) { .cart-line { flex-wrap: wrap; } .cart-line-total { min-width: auto; } }
+
+/* Cassa: risultati ricerca compatti */
+.cash-search-results { margin-top: .6rem; display: flex; flex-direction: column; gap: .3rem; max-height: 320px; overflow: auto; }
+.cash-result { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .55rem .75rem; border: 1px solid rgba(66,199,255,.14); border-radius: 10px; background: var(--panel); color: inherit; cursor: pointer; text-align: left; }
+.cash-result:hover { background: rgba(66,199,255,.1); }
+.cash-result span { display: flex; flex-direction: column; min-width: 0; }
+.cash-result small { color: var(--muted, #8aa0b5); font-size: .74rem; }
+.cash-result.service { border-color: rgba(120,215,120,.3); }

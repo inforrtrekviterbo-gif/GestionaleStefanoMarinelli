@@ -26,7 +26,7 @@ type Gift = { id: number; issuedSaleId: number };
 type Reservation = { id: number; issuedSaleId: number; kind: string };
 type FiscalDevice = { id: number; store: Store; vendor: string; model: string; enabled: number; hasToken: number; lastSeenAt: string | null; lastStatus: string; lastError: string | null };
 type FiscalJob = { id: number; saleId: number; store: Store; status: string; attempts: number; deviceResponse: string | null; receiptNo: string };
-type CashData = { user: User; products: Product[]; customers: Customer[]; gifts: Gift[]; reservations: Reservation[]; fiscalDevices: FiscalDevice[]; fiscalJobs: FiscalJob[]; generatedAt: string };
+type CashData = { user: User; products: Product[]; customers: Customer[]; gifts: Gift[]; reservations: Reservation[]; fiscalDevices: FiscalDevice[]; fiscalJobs: FiscalJob[]; generatedAt: string; services: { id: number; name: string; price: number; active: number }[] };
 type CartItem = {
   key: string;
   productId: number | null;
@@ -532,11 +532,32 @@ function ProductThumb({ photoKey, name, className = "" }: { photoKey: string | n
   return <div className={`${className} thumb-ph`} aria-hidden="true"><span>{initials}</span></div>;
 }
 
+function CashSearch({ products, services, available, onProduct, onService }: {
+  products: Product[];
+  services: { id: number; name: string; price: number; active: number }[];
+  available: (product: Product) => number;
+  onProduct: (product: Product) => void;
+  onService: (service: { id: number; name: string; price: number }) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLocaleLowerCase("it");
+  const prodMatches = q ? products.filter((p) => available(p) > 0 && `${p.brand} ${p.name} ${p.color} ${p.size} ${p.sku} ${p.eans}`.toLocaleLowerCase("it").includes(q)).slice(0, 40) : [];
+  const svcMatches = q ? (services ?? []).filter((s) => s.active && s.name.toLocaleLowerCase("it").includes(q)).slice(0, 20) : [];
+  return <div className="cash-search">
+    <div className="search-hero"><MaterialIcon>search</MaterialIcon><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cerca prodotto o servizio per nome, colore, taglia, SKU…" /></div>
+    {q && <div className="cash-search-results">
+      {!prodMatches.length && !svcMatches.length ? <Empty>Nessun risultato.</Empty> : <>
+        {prodMatches.map((p) => <button type="button" className="cash-result" key={`p-${p.id}`} onClick={() => { onProduct(p); setQuery(""); }}><span><strong>{p.name}</strong><small>{p.brand} · {p.color} · {p.size} · {available(p)} pz</small></span><b>{money(p.price)}</b></button>)}
+        {svcMatches.map((s) => <button type="button" className="cash-result service" key={`s-${s.id}`} onClick={() => { onService(s); setQuery(""); }}><span><strong>{s.name}</strong><small>Servizio</small></span><b>{money(s.price)}</b></button>)}
+      </>}
+    </div>}
+  </div>;
+}
+
 export default function CashRegister({ data, reload, queue, onQueueConsumed }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void }) {
   const [adminStore, setAdminStore] = useState<Store>("Viterbo");
   const store = data.user.store ?? adminStore;
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [prodQuery, setProdQuery] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [customerQuery, setCustomerQuery] = useState("");
   const [modal, setModal] = useState<string | null>(null);
@@ -592,6 +613,11 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       return existing ? current.map((item) => item.key === existing.key ? { ...item, quantity: item.quantity + 1 } : item) : [...current, { key: keyId(), productId: product.id, description: productLabel(product), quantity: 1, unitPrice: product.price, discountPercent: 0, itemType: "product", metadata: {} }];
     });
     setTotalOverride(""); setError(""); setNotice(`${product.name} aggiunto automaticamente al carrello.`);
+  }
+
+  function addService(service: { id: number; name: string; price: number }) {
+    setCart((current) => [...current, { key: keyId(), productId: null, description: service.name, quantity: 1, unitPrice: service.price, discountPercent: 0, itemType: "service", metadata: { serviceId: service.id } }]);
+    setTotalOverride(""); setError(""); setNotice(`${service.name} aggiunto al carrello.`);
   }
 
   // Drena la coda "aggiungi alla vendita" arrivata da scansioni fuori dalla cassa.
@@ -714,11 +740,10 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       {error && <div className="alert danger visual-alert"><MaterialIcon>warning</MaterialIcon>{error}</div>}
       <div className="cash-grid">
         <div className="cash-main">
-          <div className="panel scanner-panel"><div className="scanner-panel-head"><p className="eyebrow">SCANNER</p><Scanner onScan={scan} /></div><div className="search-hero"><MaterialIcon>search</MaterialIcon><input value={prodQuery} onChange={(event) => setProdQuery(event.target.value)} placeholder="Cerca prodotto per nome, colore, taglia, SKU…" /></div>{(() => {
-            const q = prodQuery.trim().toLocaleLowerCase("it");
-            const list = data.products.filter((p) => available(p) > 0 && (!q || `${p.brand} ${p.name} ${p.color} ${p.size} ${p.sku} ${p.eans}`.toLocaleLowerCase("it").includes(q))).sort((a, b) => `${a.name} ${a.color}`.localeCompare(`${b.name} ${b.color}`, "it")).slice(0, 60);
-            return list.length ? <div className="cash-product-grid">{list.map((p) => <button type="button" className="cash-prod-card" key={p.id} onClick={() => addProduct(p)}><ProductThumb photoKey={p.photoKey} name={p.name} className="cpc-thumb" /><span className="cpc-name">{p.name}</span><span className="cpc-var">{p.color} · {p.size}</span><span className="cpc-foot"><b>{money(p.price)}</b><small>{available(p)} pz</small></span></button>)}</div> : <Empty>{q ? "Nessun prodotto trovato." : "Nessun prodotto disponibile in questo negozio."}</Empty>;
-          })()}</div>
+          <div className="panel scanner-panel">
+            <div className="scanner-panel-head"><p className="eyebrow">SCANNER</p><Scanner onScan={scan} /></div>
+            <CashSearch products={data.products} services={data.services} available={available} onProduct={addProduct} onService={addService} />
+          </div>
           <div className="panel"><div className="panel-title"><div><p className="eyebrow">CLIENTE</p><h2>{customer ? customerLabel(customer) : "Associa cliente o azienda"}</h2></div>{customer && <button className="text-button" onClick={() => setCustomer(null)}>Rimuovi</button>}</div><ClearableInput value={customerQuery} onChange={setCustomerQuery} placeholder="Nome, società o P.IVA…" />{customerMatches.length > 0 && <div className="customer-dropdown">{customerMatches.map((item) => <button key={item.id} onClick={() => { setCustomer(item); setCustomerQuery(""); }}><strong>{customerLabel(item)}</strong><small>{item.vatNumber || item.city || item.phone || item.scope}</small></button>)}</div>}</div>
           <div className="actions-strip"><button className="action-customer" onClick={() => setModal("customer")}><MaterialIcon>person_add</MaterialIcon><span>Nuovo cliente</span></button><button className="action-gift" onClick={() => setModal("gift")}><MaterialIcon>redeem</MaterialIcon><span>Buono regalo</span></button><button className="action-varie" onClick={() => setModal("varie")}><MaterialIcon>shopping_bag</MaterialIcon><span>Varie</span></button>{store === "Viterbo" ? <button className="action-repair" onClick={() => setModal("repair")}><MaterialIcon>footprint</MaterialIcon><span>Risuolatura</span></button> : <button className="action-shirt" onClick={() => setModal("shirt")}><MaterialIcon>checkroom</MaterialIcon><span>Maglie Gran Sasso</span></button>}<button className="action-reservation" onClick={() => setModal("reservation")}><MaterialIcon>calendar_month</MaterialIcon><span>Prenotazione</span></button><button className="action-return" onClick={() => setModal("return")}><MaterialIcon>sync_alt</MaterialIcon><span>Reso / cambio</span></button></div>
           <div className="panel cart-panel"><div className="panel-title"><div><p className="eyebrow">VENDITA</p><h2>Prodotti nel carrello</h2></div><span className="count-pill">{cart.length} righe</span></div>{!cart.length ? <Empty>Scansiona un EAN per inserire automaticamente il prodotto.</Empty> : <div className="cart-list">{cart.map((item) => {
