@@ -771,6 +771,21 @@ async function createSale(user: SessionUser, body: JsonMap) {
       if (!reservation || reservation.status !== "open" || reservation.store !== store) return json({ error: "Prenotazione o risuolatura non disponibile per il saldo." }, 409);
       continue;
     }
+    if (item.itemType === "reservation_deposit") {
+      const reservationId = Math.round(numberValue(item.metadata.reservationId));
+      const reservation = await database().prepare(`SELECT status FROM reservations WHERE id = ?`).bind(reservationId).first<{ status: string }>();
+      if (!reservation || reservation.status !== "open") return json({ error: "Prenotazione non disponibile per l'acconto." }, 409);
+      continue;
+    }
+    if (item.itemType === "reservation_credit") {
+      const reservationId = Math.round(numberValue(item.metadata.reservationId));
+      const reservation = await database().prepare(`SELECT deposit_amount AS depositAmount, deposit_paid AS depositPaid, status FROM reservations WHERE id = ?`).bind(reservationId).first<{ depositAmount: number; depositPaid: number; status: string }>();
+      if (!reservation || reservation.depositPaid !== 1 || reservation.status !== "open" || Math.abs(item.unitPrice) > reservation.depositAmount + 0.001) return json({ error: "Credito acconto non valido." }, 409);
+      continue;
+    }
+    // Le righe di consegna prenotazione usano stock riservato: il riservato viene
+    // liberato nella stessa vendita, quindi non applicare il controllo standard.
+    if (numberValue(item.metadata.deliverReservationId) > 0) continue;
     if (!item.productId || item.itemType === "return" || item.itemType === "reservation_balance") continue;
     const row = await database().prepare(`SELECT quantity, reserved FROM inventory WHERE product_id = ? AND store = ?`).bind(item.productId, store).first<{ quantity: number; reserved: number }>();
     if (!row || row.quantity - row.reserved < item.quantity) inventoryErrors.push(item.description);
@@ -853,7 +868,7 @@ async function createSale(user: SessionUser, body: JsonMap) {
       const reservationId = Math.round(numberValue(item.metadata.deliverReservationId));
       const reserved = await all<{ productId: number | null; quantity: number }>(`SELECT product_id AS productId, quantity FROM reservation_items WHERE reservation_id = ?`, reservationId);
       for (const line of reserved) if (line.productId) await database().prepare(`UPDATE inventory SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND store = ?`).bind(line.quantity, line.productId, store).run();
-      await database().prepare(`UPDATE reservations SET status = 'delivered', redeemed_sale_id = ? WHERE id = ? AND status = 'open'`).bind(saleId, reservationId).run();
+      await database().prepare(`UPDATE reservations SET status = 'delivered', balance_due = 0, redeemed_sale_id = ? WHERE id = ? AND status = 'open'`).bind(saleId, reservationId).run();
     }
   }
 
