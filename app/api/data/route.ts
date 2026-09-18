@@ -183,7 +183,7 @@ async function bootstrap(user: SessionUser) {
   const transferRows = await all<{ fromStore: string } & Record<string, unknown>>(`SELECT t.id, t.code, t.from_store AS fromStore, t.to_store AS toStore, t.sender, t.receiver, t.carrier, t.transport_reason AS transportReason, t.status, t.note, t.completed_at AS completedAt, t.created_at AS createdAt, COUNT(ti.id) AS lineCount, COALESCE(SUM(ti.quantity), 0) AS totalQuantity FROM transfers t LEFT JOIN transfer_items ti ON ti.transfer_id = t.id GROUP BY t.id ORDER BY t.created_at DESC LIMIT 300`);
   const gifts = user.role === "admin" ? giftRows : giftRows.filter((gift) => gift.store === user.store);
   const reservations = user.role === "admin" ? reservationRows : reservationRows.filter((reservation) => reservation.store === user.store);
-  const transfers = user.role === "admin" ? transferRows : transferRows.filter((transfer) => transfer.fromStore === user.store);
+  const transfers = user.role === "admin" ? transferRows : transferRows.filter((transfer) => transfer.fromStore === user.store || transfer.toStore === user.store);
   const documents = user.role === "admin" ? await all(`SELECT id, number, type, recipient, origin, payment_method AS paymentMethod, sale_id AS saleId, net_total AS netTotal, tax_total AS taxTotal, total, created_at AS createdAt FROM business_documents ORDER BY created_at DESC LIMIT 300`) : [];
   const saleItems = user.role === "admin" ? await all(`SELECT si.id, si.sale_id AS saleId, si.product_id AS productId, si.description, si.quantity, si.line_total AS lineTotal, si.item_type AS itemType, s.store, s.created_at AS createdAt, COALESCE(p.brand, '') AS brand, COALESCE(p.name, si.description) AS productName, COALESCE(p.color, '') AS color, COALESCE(p.size, '') AS size, COALESCE(p.variant_group, '') AS variantGroup FROM sale_items si JOIN sales s ON s.id = si.sale_id LEFT JOIN products p ON p.id = si.product_id ORDER BY s.created_at DESC LIMIT 5000`) : [];
   const allFiscalDevices = await all<{ store: string } & Record<string, unknown>>(`SELECT id, store, vendor, model, connector, enabled, token_hash IS NOT NULL AS hasToken, last_seen_at AS lastSeenAt, last_status AS lastStatus, last_error AS lastError, updated_at AS updatedAt FROM fiscal_devices ORDER BY store DESC`);
@@ -1020,8 +1020,8 @@ async function createTransfer(user: SessionUser, body: JsonMap) {
   // quando l'admin la completa.
   const fromStore = validStore(body.fromStore) ? body.fromStore : user.store;
   if (!fromStore) return json({ error: "Seleziona il magazzino di partenza." }, 400);
-  if (user.role !== "admin" && user.store !== fromStore) return json({ error: "Puoi richiedere trasferimenti solo dal tuo negozio." }, 403);
   const toStore: Store = fromStore === "Viterbo" ? "Gran Sasso" : "Viterbo";
+  if (user.role !== "admin" && user.store !== fromStore && user.store !== toStore) return json({ error: "Puoi gestire solo trasferimenti che coinvolgono il tuo negozio." }, 403);
   const items = normalizeItems(body.items).filter((item) => item.productId && item.quantity > 0);
   if (!items.length) return json({ error: "Aggiungi almeno un prodotto." }, 400);
   const code = idCode("DDT");

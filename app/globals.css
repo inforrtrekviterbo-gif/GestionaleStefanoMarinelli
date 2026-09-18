@@ -949,3 +949,9 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .toggle-row input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--lime, #72d7ff); cursor: pointer; flex-shrink: 0; }
 .toggle-row span { display: flex; flex-direction: column; gap: .15rem; }
 .toggle-row small { color: var(--muted, #8aa0b5); }
+
+/* Trasferimenti: selezione tratta Da → A */
+.transfer-route { display: flex; align-items: flex-end; gap: .8rem; margin-bottom: .4rem; flex-wrap: wrap; }
+.transfer-route .field { flex: 1; min-width: 130px; }
+.transfer-route-arrow { display: flex; align-items: center; height: 40px; color: var(--muted, #8aa0b5); }
+.transfer-fixed { display: flex; align-items: center; gap: .5rem; height: 40px; padding: 0 .8rem; border: 1px solid rgba(66,199,255,.25); border-radius: 12px; font-weight: 700; }
