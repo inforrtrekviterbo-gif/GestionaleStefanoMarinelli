@@ -309,6 +309,11 @@ function useGlobalScanner(onScan: (code: string) => void) {
     const MAX_GAP = 50; // ms tra due tasti dello scanner
     const MIN_LEN = 6;  // lunghezza minima per considerarlo un codice
     function onKeyDown(event: KeyboardEvent) {
+      // Se il focus è in un campo di testo (EAN, ricerca, form) lasciamo gestire
+      // a quel campo: evita doppie letture e caratteri "sporchi" negli input.
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
       const now = event.timeStamp;
       if (now - lastTime > MAX_GAP) buffer = "";
       lastTime = now;
