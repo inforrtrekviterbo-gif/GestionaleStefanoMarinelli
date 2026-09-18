@@ -24,26 +24,32 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  await ensureDatabase();
-  const body = (await request.json().catch(() => ({}))) as LoginBody;
-  if (body.action === "logout") {
-    await removeSession(request);
-    return json({ ok: true }, 200, { "Set-Cookie": `gestionale_session=; Path=/; HttpOnly${cookieSecure()}; SameSite=Strict; Max-Age=0` });
-  }
-  if (body.action === "dev-login") {
-    if (process.env.DEV_LOGIN !== "1" && !isDevDb()) return json({ error: "Accesso di sviluppo non abilitato." }, 403);
-    const user = await applicationUserForEmail("admin@gestionale.local");
-    if (!user) return json({ error: "Profilo admin non disponibile." }, 500);
-    const session = await createSession(user.id, 8 * 60 * 60);
+  try {
+    await ensureDatabase();
+    const body = (await request.json().catch(() => ({}))) as LoginBody;
+    if (body.action === "logout") {
+      await removeSession(request);
+      return json({ ok: true }, 200, { "Set-Cookie": `gestionale_session=; Path=/; HttpOnly${cookieSecure()}; SameSite=Strict; Max-Age=0` });
+    }
+    if (body.action === "dev-login") {
+      if (process.env.DEV_LOGIN !== "1" && !isDevDb()) return json({ error: "Accesso di sviluppo non abilitato." }, 403);
+      const user = await applicationUserForEmail("admin@gestionale.local");
+      if (!user) return json({ error: "Profilo admin non disponibile." }, 500);
+      const session = await createSession(user.id, 8 * 60 * 60);
+      return json({ user }, 200, { "Set-Cookie": session.cookie });
+    }
+    if (body.action !== "supabase-login" || !body.accessToken) return json({ error: "Accesso Supabase richiesto." }, 400);
+
+    const identity = await verifySupabaseToken(body.accessToken);
+    if (!identity) return json({ error: "Credenziali Supabase non valide o scadute." }, 401);
+    const user = await applicationUserForEmail(identity.email);
+    if (!user) return json({ error: "Profilo gestionale non autorizzato per questa email." }, 403);
+
+    const session = await createSession(user.id, 12 * 60 * 60);
     return json({ user }, 200, { "Set-Cookie": session.cookie });
+  } catch (reason) {
+    const message = reason instanceof Error ? reason.message : "Errore sconosciuto";
+    console.error("[/api/auth] errore:", message, reason);
+    return json({ error: `Errore accesso: ${message}` }, 500);
   }
-  if (body.action !== "supabase-login" || !body.accessToken) return json({ error: "Accesso Supabase richiesto." }, 400);
-
-  const identity = await verifySupabaseToken(body.accessToken);
-  if (!identity) return json({ error: "Credenziali Supabase non valide o scadute." }, 401);
-  const user = await applicationUserForEmail(identity.email);
-  if (!user) return json({ error: "Profilo gestionale non autorizzato per questa email." }, 403);
-
-  const session = await createSession(user.id, 12 * 60 * 60);
-  return json({ user }, 200, { "Set-Cookie": session.cookie });
 }
