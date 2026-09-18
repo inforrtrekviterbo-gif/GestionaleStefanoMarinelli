@@ -694,32 +694,12 @@ type ReportSale = Pick<Sale, "store" | "total" | "cashAmount" | "cardAmount" | "
 const reportStores: Store[] = ["Viterbo", "Gran Sasso"];
 
 function CashReports({ data }: { data: Bootstrap }) {
-  const [mode, setMode] = useState<"daily" | "monthly">("daily");
   const sales: ReportSale[] = data.sales;
   const totalFor = (store?: Store) => sales.filter((sale) => !store || sale.store === store).reduce((sum, sale) => sum + sale.total, 0);
   const grandTotal = totalFor();
   const storeTotals = { Viterbo: totalFor("Viterbo"), "Gran Sasso": totalFor("Gran Sasso") };
   const movementCount = sales.length;
   const averageTicket = movementCount ? grandTotal / movementCount : 0;
-  const reportRows = useMemo(() => {
-    const rows = new Map<string, { sortKey: string; label: string; viterbo: number; granSasso: number; count: number; returns: number }>();
-    for (const sale of sales) {
-      const date = new Date(sale.createdAt);
-      const sortKey = mode === "daily"
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
-        : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-      const label = mode === "daily"
-        ? date.toLocaleDateString("it-IT", { weekday: "short", day: "2-digit", month: "short" })
-        : date.toLocaleDateString("it-IT", { month: "long", year: "numeric" });
-      const current = rows.get(sortKey) ?? { sortKey, label, viterbo: 0, granSasso: 0, count: 0, returns: 0 };
-      if (sale.store === "Viterbo") current.viterbo += sale.total;
-      else current.granSasso += sale.total;
-      current.count += 1;
-      if (sale.total < 0) current.returns += sale.total;
-      rows.set(sortKey, current);
-    }
-    return [...rows.values()].sort((left, right) => right.sortKey.localeCompare(left.sortKey));
-  }, [sales, mode]);
   const maxStoreTotal = Math.max(1, ...reportStores.map((store) => Math.abs(storeTotals[store])));
   const reportTree = useMemo(() => reportStores.map((store) => {
     const storeSales = sales.filter((sale) => sale.store === store);
@@ -757,10 +737,7 @@ function CashReports({ data }: { data: Bootstrap }) {
 
   return <section className="screen reports-screen">
     <div className="screen-head reports-head">
-      <div><p className="eyebrow">CORRISPETTIVI · ENTRAMBI I NEGOZI</p><h1>Quanto stanno facendo i negozi</h1><p className="muted inventory-intro">Incassi, pagamenti e confronto tra Viterbo e Gran Sasso in una sola schermata.</p></div>
-      <div className="head-controls report-controls">
-        <label className="field inline"><span>Raggruppamento</span><select value={mode} onChange={(event) => setMode(event.target.value as "daily" | "monthly")}><option value="daily">Giornaliero</option><option value="monthly">Mensile</option></select></label>
-      </div>
+      <div><p className="eyebrow">CORRISPETTIVI · ENTRAMBI I NEGOZI</p><h1>Quanto stanno facendo i negozi</h1><p className="muted inventory-intro">Incassi e pagamenti di Viterbo e Gran Sasso in una sola schermata.</p></div>
     </div>
     <div className="report-kpis">
       <article className="report-kpi primary-kpi"><MaterialIcon>payments</MaterialIcon><span><small>Totale complessivo</small><strong>{money(grandTotal)}</strong><em>{movementCount} movimenti</em></span></article>
@@ -812,14 +789,6 @@ function CashReports({ data }: { data: Bootstrap }) {
         </div>
       </details>)}
     </div>
-    <details className="panel report-comparison">
-      <summary className="panel-title"><span className="report-chevron"><MaterialIcon>chevron_right</MaterialIcon></span><div><p className="eyebrow">CONFRONTO DIRETTO</p><h2>{mode === "daily" ? "Incassi giorno per giorno" : "Incassi mese per mese"}</h2></div><div className="chart-legend"><span><i className="viterbo" />Viterbo</span><span><i className="gran-sasso" />Gran Sasso</span></div></summary>
-      <div className="table-wrap report-comparison-table"><table><thead><tr><th>Periodo</th><th>Viterbo</th><th>Gran Sasso</th><th>Totale negozi</th><th>Differenza</th><th>Resi</th><th>Movimenti</th></tr></thead><tbody>{reportRows.length ? reportRows.map((row) => {
-        const total = row.viterbo + row.granSasso;
-        const difference = row.viterbo - row.granSasso;
-        return <tr key={row.sortKey}><td><strong>{row.label}</strong></td><td><b className="store-value viterbo">{money(row.viterbo)}</b></td><td><b className="store-value gran-sasso">{money(row.granSasso)}</b></td><td><strong>{money(total)}</strong></td><td className={difference < 0 ? "negative" : ""}>{difference >= 0 ? "+" : ""}{money(difference)}</td><td className="negative">{money(row.returns)}</td><td>{row.count}</td></tr>;
-      }) : <tr><td colSpan={7}><Empty>Nessun corrispettivo disponibile.</Empty></td></tr>}</tbody></table></div>
-    </details>
   </section>;
 }
 
