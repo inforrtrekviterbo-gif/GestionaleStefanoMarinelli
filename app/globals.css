@@ -959,3 +959,8 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 /* Trasferimenti: righe evidenziate per esito */
 .transfer-accepted td { background: rgba(120,215,120,.10); }
 .transfer-rejected td { background: rgba(255,138,156,.10); }
+
+/* Bottone in caricamento: spinner */
+.btn-spinner { display: inline-block; width: 16px; height: 16px; margin-right: .5rem; vertical-align: -3px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: btn-spin .7s linear infinite; }
+.checkout-button.is-loading { opacity: .9; cursor: progress; }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
