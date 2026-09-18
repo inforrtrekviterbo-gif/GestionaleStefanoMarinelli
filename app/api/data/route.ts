@@ -845,6 +845,16 @@ async function createSale(user: SessionUser, body: JsonMap) {
         }
       }
     }
+    if (item.itemType === "reservation_deposit") {
+      const reservationId = Math.round(numberValue(item.metadata.reservationId));
+      if (reservationId) await database().prepare(`UPDATE reservations SET deposit_paid = 1, issued_sale_id = ? WHERE id = ? AND status = 'open'`).bind(saleId, reservationId).run();
+    }
+    if (numberValue(item.metadata.deliverReservationId) > 0) {
+      const reservationId = Math.round(numberValue(item.metadata.deliverReservationId));
+      const reserved = await all<{ productId: number | null; quantity: number }>(`SELECT product_id AS productId, quantity FROM reservation_items WHERE reservation_id = ?`, reservationId);
+      for (const line of reserved) if (line.productId) await database().prepare(`UPDATE inventory SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND store = ?`).bind(line.quantity, line.productId, store).run();
+      await database().prepare(`UPDATE reservations SET status = 'delivered', redeemed_sale_id = ? WHERE id = ? AND status = 'open'`).bind(saleId, reservationId).run();
+    }
   }
 
   let replacementGift: { id: number; code: string; value: number; beneficiary: string } | null = null;
