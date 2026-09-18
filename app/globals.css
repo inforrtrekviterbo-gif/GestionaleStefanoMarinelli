@@ -955,3 +955,7 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .transfer-route .field { flex: 1; min-width: 130px; }
 .transfer-route-arrow { display: flex; align-items: center; height: 40px; color: var(--muted, #8aa0b5); }
 .transfer-fixed { display: flex; align-items: center; gap: .5rem; height: 40px; padding: 0 .8rem; border: 1px solid rgba(66,199,255,.25); border-radius: 12px; font-weight: 700; }
+
+/* Trasferimenti: righe evidenziate per esito */
+.transfer-accepted td { background: rgba(120,215,120,.10); }
+.transfer-rejected td { background: rgba(255,138,156,.10); }
