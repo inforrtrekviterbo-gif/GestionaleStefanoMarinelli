@@ -779,8 +779,9 @@ async function createSale(user: SessionUser, body: JsonMap) {
     }
     if (item.itemType === "reservation_credit") {
       const reservationId = Math.round(numberValue(item.metadata.reservationId));
-      const reservation = await database().prepare(`SELECT deposit_amount AS depositAmount, deposit_paid AS depositPaid, status FROM reservations WHERE id = ?`).bind(reservationId).first<{ depositAmount: number; depositPaid: number; status: string }>();
-      if (!reservation || reservation.depositPaid !== 1 || reservation.status !== "open" || Math.abs(item.unitPrice) > reservation.depositAmount + 0.001) return json({ error: "Credito acconto non valido." }, 409);
+      const reservation = await database().prepare(`SELECT deposit_amount AS depositAmount, deposit_paid AS depositPaid, issued_sale_id AS issuedSaleId, status FROM reservations WHERE id = ?`).bind(reservationId).first<{ depositAmount: number; depositPaid: number; issuedSaleId: number | null; status: string }>();
+      const collected = !!reservation && (reservation.depositPaid === 1 || !!reservation.issuedSaleId);
+      if (!reservation || !collected || reservation.status !== "open" || Math.abs(item.unitPrice) > reservation.depositAmount + 0.001) return json({ error: "Credito acconto non valido." }, 409);
       continue;
     }
     // Le righe di consegna prenotazione usano stock riservato: il riservato viene
