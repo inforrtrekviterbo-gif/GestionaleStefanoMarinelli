@@ -555,12 +555,14 @@ function CustomerInline({ data, store, customer, onSelect, reload }: {
   const [error, setError] = useState("");
   const q = query.trim().toLocaleLowerCase("it");
   const matches = q ? data.customers.filter((c) => `${customerLabel(c)} ${c.phone}`.toLocaleLowerCase("it").includes(q)).slice(0, 6) : [];
-  const canCreate = q.length >= 2 && !matches.some((c) => customerLabel(c).toLocaleLowerCase("it") === q);
+  // Serve Nome E Cognome (almeno due parole): il server esige entrambi.
+  const hasFullName = query.trim().split(/\s+/).length >= 2;
+  const canCreate = hasFullName && !matches.some((c) => customerLabel(c).toLocaleLowerCase("it") === q);
   async function create() {
     setError("");
     const tokens = query.trim().split(/\s+/);
-    const lastName = tokens.length > 1 ? tokens[tokens.length - 1] : tokens[0];
-    const firstName = tokens.length > 1 ? tokens.slice(0, -1).join(" ") : "";
+    const lastName = tokens[tokens.length - 1];
+    const firstName = tokens.slice(0, -1).join(" ");
     setBusy(true);
     try {
       const result = await post("createCustomer", { firstName, lastName, store });
