@@ -1083,7 +1083,8 @@ async function createReservation(user: SessionUser, body: JsonMap) {
   const store = validStore(body.store) ? body.store : user.store;
   if (!store) return json({ error: "Seleziona il negozio." }, 400);
   if (user.role !== "admin" && user.store !== store) return json({ error: "Puoi prenotare solo per il tuo negozio." }, 403);
-  const type = stringValue(body.type) === "service" ? "service" : "product";
+  const requestedType = stringValue(body.type);
+  const type = requestedType === "service" || requestedType === "repair" ? requestedType : "product";
   const note = stringValue(body.note);
   const expectedDelivery = stringValue(body.expectedDelivery).trim();
   if (expectedDelivery && !/^\d{4}-\d{2}-\d{2}$/.test(expectedDelivery)) return json({ error: "Data di consegna non valida." }, 400);
@@ -1100,28 +1101,39 @@ async function createReservation(user: SessionUser, body: JsonMap) {
     }
   }
 
-  const items = type === "product" ? normalizeReservationLines(body.items) : [];
-  const description = type === "service" ? (stringValue(body.serviceDescription).trim() || "Servizio") : "Prenotazione prodotti";
+  const kind = type === "repair" ? "repair" : "reservation";
+  const productItems = type === "product" ? normalizeReservationLines(body.items) : [];
+  // Risuolatura: righe libere (roba del cliente), nessun prodotto/giacenza.
+  const repairItems = type === "repair" && Array.isArray(body.items)
+    ? (body.items as unknown[]).map((raw) => { const row = (raw ?? {}) as JsonMap; return { description: stringValue(row.description).trim() || "Articolo", quantity: Math.max(1, Math.round(numberValue(row.quantity) || 1)), unitPrice: Math.max(0, Math.round(numberValue(row.unitPrice) * 100) / 100) }; })
+    : [];
+  const description = type === "service" ? (stringValue(body.serviceDescription).trim() || "Servizio") : type === "repair" ? "Risuolatura" : "Prenotazione prodotti";
   const total = type === "service"
     ? Math.max(0, Math.round(numberValue(body.serviceAmount) * 100) / 100)
-    : Math.round(items.reduce((sum, item) => sum + item.quantity * item.unitPrice * (1 - item.discountPercent / 100), 0) * 100) / 100;
+    : type === "repair"
+    ? Math.round(repairItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) * 100) / 100
+    : Math.round(productItems.reduce((sum, item) => sum + item.quantity * item.unitPrice * (1 - item.discountPercent / 100), 0) * 100) / 100;
   if (total <= 0) return json({ error: "Aggiungi almeno un articolo o un importo." }, 400);
   if (deposit > total) return json({ error: "L'acconto non può superare il totale." }, 400);
 
   const code = ean13();
   const now = new Date().toISOString();
   const balanceDue = Math.round((total - deposit) * 100) / 100;
-  const created = await database().prepare(`INSERT INTO reservations (code, store, customer_id, product_id, description, kind, total_price, deposit_amount, balance_due, status, issued_sale_id, expected_delivery, deposit_paid, note, created_at) VALUES (?, ?, ?, NULL, ?, 'reservation', ?, ?, ?, 'open', NULL, ?, 0, ?, ?)`)
-    .bind(code, store, customerId, description, total, deposit, balanceDue, expectedDelivery || null, note || null, now).run();
+  const created = await database().prepare(`INSERT INTO reservations (code, store, customer_id, product_id, description, kind, total_price, deposit_amount, balance_due, status, issued_sale_id, expected_delivery, deposit_paid, note, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 'open', NULL, ?, 0, ?, ?)`)
+    .bind(code, store, customerId, description, kind, total, deposit, balanceDue, expectedDelivery || null, note || null, now).run();
   const reservationId = Number(created.meta?.last_row_id);
   if (!reservationId) return json({ error: "Prenotazione non registrata." }, 500);
-  for (const item of items) {
+  for (const item of productItems) {
     if (!item.productId) continue;
     await database().prepare(`INSERT INTO reservation_items (reservation_id, product_id, description, quantity, unit_price, discount_percent) VALUES (?, ?, ?, ?, ?, ?)`)
       .bind(reservationId, item.productId, item.description, item.quantity, item.unitPrice, item.discountPercent).run();
     await database().prepare(`UPDATE inventory SET reserved = reserved + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, store).run();
   }
-  await logActivity({ user, action: "create", entity: "reservation", entityId: reservationId, detail: `Prenotazione ${code} · ${description}`, store });
+  for (const item of repairItems) {
+    await database().prepare(`INSERT INTO reservation_items (reservation_id, product_id, description, quantity, unit_price, discount_percent) VALUES (?, NULL, ?, ?, ?, 0)`)
+      .bind(reservationId, item.description, item.quantity, item.unitPrice).run();
+  }
+  await logActivity({ user, action: "create", entity: "reservation", entityId: reservationId, detail: `${type === "repair" ? "Risuolatura" : "Prenotazione"} ${code}`, store });
   return json({ ok: true, id: reservationId, code });
 }
 
