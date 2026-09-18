@@ -178,7 +178,7 @@ async function bootstrap(user: SessionUser) {
   const allSales = await all<{ store: string } & Record<string, unknown>>(`SELECT s.id, s.receipt_no AS receiptNo, s.store, s.customer_id AS customerId, s.type, s.subtotal, s.adjustment, s.total, s.cash_amount AS cashAmount, s.card_amount AS cardAmount, s.bank_amount AS bankAmount, s.gift_amount AS giftAmount, s.fiscal_status AS fiscalStatus, s.fiscal_document_type AS fiscalDocumentType, s.created_at AS createdAt, COALESCE(CASE WHEN c.customer_type = 'company' THEN c.company_name ELSE TRIM(c.first_name || ' ' || c.last_name) END, 'Cliente non associato') AS customerName FROM sales s LEFT JOIN customers c ON c.id = s.customer_id ORDER BY s.created_at DESC LIMIT 300`);
   const sales = user.role === "admin" ? allSales : allSales.filter((sale) => sale.store === user.store);
   const giftRows = await all<{ store: string } & Record<string, unknown>>(`SELECT id, code, beneficiary, initial_value AS initialValue, balance, expires_at AS expiresAt, store, issued_sale_id AS issuedSaleId, status, created_at AS createdAt FROM gift_cards WHERE status <> 'deleted' ORDER BY created_at DESC LIMIT 500`);
-  const reservationRows = await all<{ store: string } & Record<string, unknown>>(`SELECT r.id, r.code, r.store, r.customer_id AS customerId, r.product_id AS productId, r.description, r.kind, r.total_price AS totalPrice, r.deposit_amount AS depositAmount, r.balance_due AS balanceDue, r.status, r.issued_sale_id AS issuedSaleId, r.created_at AS createdAt, COALESCE(CASE WHEN c.customer_type = 'company' THEN c.company_name ELSE TRIM(c.first_name || ' ' || c.last_name) END, '') AS customerName, (SELECT COALESCE(SUM(ri.quantity), 0) FROM reservation_items ri WHERE ri.reservation_id = r.id) AS itemCount, (SELECT COALESCE(GROUP_CONCAT(ri.description, ' '), '') FROM reservation_items ri WHERE ri.reservation_id = r.id) AS itemDescriptions FROM reservations r LEFT JOIN customers c ON c.id = r.customer_id ORDER BY r.created_at DESC LIMIT 500`);
+  const reservationRows = await all<{ store: string } & Record<string, unknown>>(`SELECT r.id, r.code, r.store, r.customer_id AS customerId, r.product_id AS productId, r.description, r.kind, r.total_price AS totalPrice, r.deposit_amount AS depositAmount, r.balance_due AS balanceDue, r.expected_delivery AS expectedDelivery, r.deposit_paid AS depositPaid, r.status, r.issued_sale_id AS issuedSaleId, r.created_at AS createdAt, COALESCE(CASE WHEN c.customer_type = 'company' THEN c.company_name ELSE TRIM(c.first_name || ' ' || c.last_name) END, '') AS customerName, (SELECT COALESCE(SUM(ri.quantity), 0) FROM reservation_items ri WHERE ri.reservation_id = r.id) AS itemCount, (SELECT COALESCE(GROUP_CONCAT(ri.description, ' '), '') FROM reservation_items ri WHERE ri.reservation_id = r.id) AS itemDescriptions FROM reservations r LEFT JOIN customers c ON c.id = r.customer_id ORDER BY r.created_at DESC LIMIT 500`);
   const transferRows = await all<{ fromStore: string } & Record<string, unknown>>(`SELECT t.id, t.code, t.from_store AS fromStore, t.to_store AS toStore, t.sender, t.receiver, t.carrier, t.transport_reason AS transportReason, t.status, t.note, t.completed_at AS completedAt, t.created_at AS createdAt, COUNT(ti.id) AS lineCount, COALESCE(SUM(ti.quantity), 0) AS totalQuantity FROM transfers t LEFT JOIN transfer_items ti ON ti.transfer_id = t.id GROUP BY t.id ORDER BY t.created_at DESC LIMIT 300`);
   const gifts = user.role === "admin" ? giftRows : giftRows.filter((gift) => gift.store === user.store);
   const reservations = user.role === "admin" ? reservationRows : reservationRows.filter((reservation) => reservation.store === user.store);
@@ -771,6 +771,21 @@ async function createSale(user: SessionUser, body: JsonMap) {
       if (!reservation || reservation.status !== "open" || reservation.store !== store) return json({ error: "Prenotazione o risuolatura non disponibile per il saldo." }, 409);
       continue;
     }
+    if (item.itemType === "reservation_deposit") {
+      const reservationId = Math.round(numberValue(item.metadata.reservationId));
+      const reservation = await database().prepare(`SELECT status FROM reservations WHERE id = ?`).bind(reservationId).first<{ status: string }>();
+      if (!reservation || reservation.status !== "open") return json({ error: "Prenotazione non disponibile per l'acconto." }, 409);
+      continue;
+    }
+    if (item.itemType === "reservation_credit") {
+      const reservationId = Math.round(numberValue(item.metadata.reservationId));
+      const reservation = await database().prepare(`SELECT deposit_amount AS depositAmount, deposit_paid AS depositPaid, status FROM reservations WHERE id = ?`).bind(reservationId).first<{ depositAmount: number; depositPaid: number; status: string }>();
+      if (!reservation || reservation.depositPaid !== 1 || reservation.status !== "open" || Math.abs(item.unitPrice) > reservation.depositAmount + 0.001) return json({ error: "Credito acconto non valido." }, 409);
+      continue;
+    }
+    // Le righe di consegna prenotazione usano stock riservato: il riservato viene
+    // liberato nella stessa vendita, quindi non applicare il controllo standard.
+    if (numberValue(item.metadata.deliverReservationId) > 0) continue;
     if (!item.productId || item.itemType === "return" || item.itemType === "reservation_balance") continue;
     const row = await database().prepare(`SELECT quantity, reserved FROM inventory WHERE product_id = ? AND store = ?`).bind(item.productId, store).first<{ quantity: number; reserved: number }>();
     if (!row || row.quantity - row.reserved < item.quantity) inventoryErrors.push(item.description);
@@ -844,6 +859,16 @@ async function createSale(user: SessionUser, body: JsonMap) {
           await database().prepare(`UPDATE inventory SET quantity = quantity - 1, reserved = MAX(reserved - 1, 0) WHERE product_id = ? AND store = ?`).bind(reservation.productId, store).run();
         }
       }
+    }
+    if (item.itemType === "reservation_deposit") {
+      const reservationId = Math.round(numberValue(item.metadata.reservationId));
+      if (reservationId) await database().prepare(`UPDATE reservations SET deposit_paid = 1, issued_sale_id = ? WHERE id = ? AND status = 'open'`).bind(saleId, reservationId).run();
+    }
+    if (numberValue(item.metadata.deliverReservationId) > 0) {
+      const reservationId = Math.round(numberValue(item.metadata.deliverReservationId));
+      const reserved = await all<{ productId: number | null; quantity: number }>(`SELECT product_id AS productId, quantity FROM reservation_items WHERE reservation_id = ?`, reservationId);
+      for (const line of reserved) if (line.productId) await database().prepare(`UPDATE inventory SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND store = ?`).bind(line.quantity, line.productId, store).run();
+      await database().prepare(`UPDATE reservations SET status = 'delivered', balance_due = 0, redeemed_sale_id = ? WHERE id = ? AND status = 'open'`).bind(saleId, reservationId).run();
     }
   }
 
@@ -1054,6 +1079,65 @@ async function createTransfer(user: SessionUser, body: JsonMap) {
   return json({ ok: true, transferId, code });
 }
 
+async function createReservation(user: SessionUser, body: JsonMap) {
+  const store = validStore(body.store) ? body.store : user.store;
+  if (!store) return json({ error: "Seleziona il negozio." }, 400);
+  if (user.role !== "admin" && user.store !== store) return json({ error: "Puoi prenotare solo per il tuo negozio." }, 403);
+  const type = stringValue(body.type) === "service" ? "service" : "product";
+  const note = stringValue(body.note);
+  const expectedDelivery = stringValue(body.expectedDelivery).trim();
+  if (expectedDelivery && !/^\d{4}-\d{2}-\d{2}$/.test(expectedDelivery)) return json({ error: "Data di consegna non valida." }, 400);
+  const deposit = Math.max(0, Math.round(numberValue(body.depositAmount) * 100) / 100);
+
+  let customerId: number | null = body.customerId != null ? Math.round(numberValue(body.customerId)) : null;
+  if (!customerId) {
+    const firstName = stringValue(body.firstName).trim();
+    const lastName = stringValue(body.lastName).trim();
+    if (firstName || lastName) {
+      const created = await database().prepare(`INSERT INTO customers (customer_type, first_name, last_name, company_name, vat_number, pec, sdi_code, phone, email, address, postal_code, city, province, tax_code, scope, created_store, created_at) VALUES ('private', ?, ?, '', '', '', '', '', '', '', '', '', '', '', ?, ?, ?)`)
+        .bind(firstName, lastName, store, store, new Date().toISOString()).run();
+      customerId = Number(created.meta?.last_row_id) || null;
+    }
+  }
+
+  const items = type === "product" ? normalizeReservationLines(body.items) : [];
+  const description = type === "service" ? (stringValue(body.serviceDescription).trim() || "Servizio") : "Prenotazione prodotti";
+  const total = type === "service"
+    ? Math.max(0, Math.round(numberValue(body.serviceAmount) * 100) / 100)
+    : Math.round(items.reduce((sum, item) => sum + item.quantity * item.unitPrice * (1 - item.discountPercent / 100), 0) * 100) / 100;
+  if (total <= 0) return json({ error: "Aggiungi almeno un articolo o un importo." }, 400);
+  if (deposit > total) return json({ error: "L'acconto non può superare il totale." }, 400);
+
+  const code = ean13();
+  const now = new Date().toISOString();
+  const balanceDue = Math.round((total - deposit) * 100) / 100;
+  const created = await database().prepare(`INSERT INTO reservations (code, store, customer_id, product_id, description, kind, total_price, deposit_amount, balance_due, status, issued_sale_id, expected_delivery, deposit_paid, note, created_at) VALUES (?, ?, ?, NULL, ?, 'reservation', ?, ?, ?, 'open', NULL, ?, 0, ?, ?)`)
+    .bind(code, store, customerId, description, total, deposit, balanceDue, expectedDelivery || null, note || null, now).run();
+  const reservationId = Number(created.meta?.last_row_id);
+  if (!reservationId) return json({ error: "Prenotazione non registrata." }, 500);
+  for (const item of items) {
+    if (!item.productId) continue;
+    await database().prepare(`INSERT INTO reservation_items (reservation_id, product_id, description, quantity, unit_price, discount_percent) VALUES (?, ?, ?, ?, ?, ?)`)
+      .bind(reservationId, item.productId, item.description, item.quantity, item.unitPrice, item.discountPercent).run();
+    await database().prepare(`UPDATE inventory SET reserved = reserved + ? WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, store).run();
+  }
+  await logActivity({ user, action: "create", entity: "reservation", entityId: reservationId, detail: `Prenotazione ${code} · ${description}`, store });
+  return json({ ok: true, id: reservationId, code });
+}
+
+async function cancelReservation(user: SessionUser, body: JsonMap) {
+  const id = Math.round(numberValue(body.id));
+  const reservation = await database().prepare(`SELECT id, store, status FROM reservations WHERE id = ?`).bind(id).first<{ id: number; store: Store; status: string }>();
+  if (!reservation) return json({ error: "Prenotazione non trovata." }, 404);
+  if (user.role !== "admin" && user.store !== reservation.store) return json({ error: "Operazione non consentita." }, 403);
+  if (reservation.status !== "open") return json({ error: "Solo le prenotazioni aperte possono essere annullate." }, 409);
+  const items = await all<{ productId: number | null; quantity: number }>(`SELECT product_id AS productId, quantity FROM reservation_items WHERE reservation_id = ?`, id);
+  for (const item of items) if (item.productId) await database().prepare(`UPDATE inventory SET reserved = MAX(0, reserved - ?) WHERE product_id = ? AND store = ?`).bind(item.quantity, item.productId, reservation.store).run();
+  await database().prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?`).bind(id).run();
+  await logActivity({ user, action: "cancel", entity: "reservation", entityId: id, store: reservation.store });
+  return json({ ok: true });
+}
+
 async function completeTransfer(user: SessionUser, body: JsonMap) {
   const denied = adminOnly(user); if (denied) return denied;
   const id = Math.round(numberValue(body.id));
@@ -1193,6 +1277,8 @@ async function postImpl(request: Request) {
     if (action === "deleteService") return deleteService(auth.user, body);
     if (action === "createSale") return createSale(auth.user, body);
     if (action === "createTransfer") return createTransfer(auth.user, body);
+    if (action === "createReservation") return createReservation(auth.user, body);
+    if (action === "cancelReservation") return cancelReservation(auth.user, body);
     if (action === "completeTransfer") return completeTransfer(auth.user, body);
     if (action === "rejectTransfer") return rejectTransfer(auth.user, body);
     if (action === "updateTransfer") return updateTransfer(auth.user, body);

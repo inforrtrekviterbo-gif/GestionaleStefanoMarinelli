@@ -38,6 +38,7 @@ export type CartItem = {
   locked?: boolean;
   metadata: Record<string, unknown>;
 };
+export type PendingCashAction = { kind: "reservationDeposit" | "reservationDelivery"; reservationId: number; label: string; lines: CartItem[] };
 
 type ReservationDraftLine = {
   key: string;
@@ -301,7 +302,7 @@ function CartRow({ item, product, onQty, onDiscountPercent, onRemove }: {
   onRemove: () => void;
 }) {
   const [mode, setMode] = useState<"pct" | "eur">("pct");
-  const editable = !item.locked && item.quantity > 0 && !["gift", "deposit", "repair_deposit", "return", "reservation_balance"].includes(item.itemType);
+  const editable = !item.locked && item.quantity > 0 && !["gift", "deposit", "repair_deposit", "return", "reservation_balance", "reservation_deposit", "reservation_credit"].includes(item.itemType);
   const discountValue = mode === "pct" ? item.discountPercent : percentToEuroDiscount(item.quantity, item.unitPrice, item.discountPercent);
   function applyDiscount(raw: string) {
     const num = Math.max(0, Number(raw) || 0);
@@ -599,7 +600,7 @@ function OperationsMenu({ store, onPick }: { store: Store; onPick: (modal: strin
   </div>;
 }
 
-export default function CashRegister({ data, reload, queue, onQueueConsumed, cart, setCart }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void; cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>> }) {
+export default function CashRegister({ data, reload, queue, onQueueConsumed, cart, setCart, pendingAction, onPendingConsumed }: { data: CashData; reload: () => Promise<void>; queue?: number[]; onQueueConsumed?: () => void; cart: CartItem[]; setCart: React.Dispatch<React.SetStateAction<CartItem[]>>; pendingAction?: PendingCashAction | null; onPendingConsumed?: () => void }) {
   const [adminStore, setAdminStore] = useState<Store>("Viterbo");
   const store = data.user.store ?? adminStore;
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -674,6 +675,14 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed, car
     onQueueConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue]);
+
+  useEffect(() => {
+    if (!pendingAction) return;
+    setCart(pendingAction.lines);
+    setNotice(pendingAction.label);
+    onPendingConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
 
   function addDraft(item: CartItem) { setCart((current) => [...current, item]); setTotalOverride(""); setModal(null); }
   function updateItem(key: string, change: Partial<CartItem>) { setCart((current) => current.map((item) => item.key === key ? { ...item, ...change } : item)); setTotalOverride(""); }
