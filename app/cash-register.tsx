@@ -604,13 +604,6 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
 
   function addDraft(item: CartItem) { setCart((current) => [...current, item]); setTotalOverride(""); setModal(null); }
   function updateItem(key: string, change: Partial<CartItem>) { setCart((current) => current.map((item) => item.key === key ? { ...item, ...change } : item)); setTotalOverride(""); }
-  function updateItemTotal(item: CartItem, value: string) {
-    const base = item.quantity * item.unitPrice;
-    if (base <= 0) return;
-    const requested = Math.min(base, Math.max(0, Number(value) || 0));
-    const discountPercent = Math.round((1 - requested / base) * 10000) / 100;
-    updateItem(item.key, { discountPercent });
-  }
   function removeItem(key: string) { setCart((current) => current.filter((item) => item.key !== key)); setTotalOverride(""); }
 
   async function scan(code: string) {
@@ -736,7 +729,7 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       onQty={(quantity) => updateItem(item.key, { quantity })}
       onDiscountPercent={(percent) => updateItem(item.key, { discountPercent: percent })}
       onRemove={() => removeItem(item.key)} />
-    {details.length > 0 && <div className="cart-subitems"><div className="cart-subitems-head"><span>Dettaglio prodotti</span><span>Qtà</span><span>Costo</span></div>{details.map((detail, index) => <div className="cart-subitem" key={`${item.key}-detail-${index}`}><span>{detail.description}</span><span>{detail.quantity}</span><b>{money(detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100))}</b></div>)}</div>}
+    {details.length > 0 && <div className="cart-subitems"><div className="cart-subitems-head"><span>Dettaglio prodotti</span><span>Qtà</span><span>Costo</span></div>{details.map((detail, index) => <div className="cart-subitem" key={`${item.key}-detail-${index}`}><span>{detail.description}</span><span>{detail.quantity}</span><b>{money(detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100))}</b></div>)}<div className="cart-subitems-total"><span>Totale operazione</span><b>{money(Number(item.metadata.totalPrice) || details.reduce((sum, detail) => sum + detail.quantity * detail.unitPrice * (1 - detail.discountPercent / 100), 0))}</b></div></div>}
   </Fragment>;
 })}</div>}</div>
         </div>
