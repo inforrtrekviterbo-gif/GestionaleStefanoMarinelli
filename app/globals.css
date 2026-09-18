@@ -924,3 +924,10 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 /* Sidebar: badge conteggio carrello sulla voce Cassa */
 .sidebar nav button { position: relative; }
 .nav-badge { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--lime, #72d7ff); color: #05131c; font-size: .72rem; font-weight: 800; line-height: 1; }
+
+/* Cassa: niente spinner nativi sui campi numero di qtà e sconto */
+.qty-stepper input::-webkit-outer-spin-button,
+.qty-stepper input::-webkit-inner-spin-button,
+.disc-field input::-webkit-outer-spin-button,
+.disc-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.qty-stepper input, .disc-field input { -moz-appearance: textfield; appearance: textfield; }
