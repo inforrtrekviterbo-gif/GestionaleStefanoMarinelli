@@ -943,3 +943,9 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .screen-head .eyebrow { display: none; }
 /* Cassa: totale scontato in evidenza */
 .grand-total.discounted strong { color: var(--lime, #72d7ff); }
+
+/* Form impostazioni: riga con interruttore */
+.toggle-row { display: flex; align-items: flex-start; gap: .7rem; padding: .5rem 0; cursor: pointer; }
+.toggle-row input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--lime, #72d7ff); cursor: pointer; flex-shrink: 0; }
+.toggle-row span { display: flex; flex-direction: column; gap: .15rem; }
+.toggle-row small { color: var(--muted, #8aa0b5); }

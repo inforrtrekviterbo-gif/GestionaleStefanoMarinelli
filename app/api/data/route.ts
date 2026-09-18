@@ -192,7 +192,10 @@ async function bootstrap(user: SessionUser) {
   const fiscalJobs = user.role === "admin" ? allFiscalJobs : allFiscalJobs.filter((job) => job.store === user.store);
   const services = await all<{ id: number; name: string; price: number; active: number }>(
     `SELECT id, name, price, active FROM services WHERE active = 1 ORDER BY name`);
-  return { user, products, customers, sales, gifts, reservations, transfers, documents, saleItems, fiscalDevices, fiscalJobs, services, generatedAt: new Date().toISOString() };
+  const reorderSettingsRow = await database().prepare(`SELECT value FROM app_settings WHERE key = 'reorder_settings'`).first<{ value: string }>();
+  let reorderSettings = { globalMinEnabled: false, globalMin: 2, suggestTransfers: true, transferSafety: 0 };
+  if (reorderSettingsRow?.value) { try { reorderSettings = { ...reorderSettings, ...JSON.parse(reorderSettingsRow.value) }; } catch { /* valore non valido: usa i default */ } }
+  return { user, products, customers, sales, gifts, reservations, transfers, documents, saleItems, fiscalDevices, fiscalJobs, services, reorderSettings, generatedAt: new Date().toISOString() };
 }
 
 async function getImpl(request: Request) {
@@ -376,6 +379,19 @@ async function deleteService(user: SessionUser, body: JsonMap) {
   if (!result.meta?.changes) return json({ error: "Servizio non trovato." }, 404);
   await logActivity({ user, action: "delete", entity: "service", entityId: id, detail: `Servizio eliminato #${id}` });
   return json({ ok: true });
+}
+
+async function saveReorderSettings(user: SessionUser, body: JsonMap) {
+  const denied = adminOnly(user); if (denied) return denied;
+  const settings = {
+    globalMinEnabled: body.globalMinEnabled === true || body.globalMinEnabled === 1,
+    globalMin: Math.max(0, Math.round(Number(body.globalMin) || 0)),
+    suggestTransfers: body.suggestTransfers !== false && body.suggestTransfers !== 0,
+    transferSafety: Math.max(0, Math.round(Number(body.transferSafety) || 0)),
+  };
+  await database().prepare(`INSERT OR REPLACE INTO app_settings (key, value) VALUES ('reorder_settings', ?)`).bind(JSON.stringify(settings)).run();
+  await logActivity({ user, action: "update", entity: "reorder_settings", detail: JSON.stringify(settings) });
+  return json({ ok: true, reorderSettings: settings });
 }
 
 async function updateProduct(user: SessionUser, body: JsonMap) {
@@ -1153,7 +1169,8 @@ async function postImpl(request: Request) {
     if (action === "createCustomer") return createCustomer(auth.user, body);
     if (action === "updateCustomer") return updateCustomer(auth.user, body);
     if (action === "deleteCustomer") return deleteCustomer(auth.user, body);
-    if (action === "createService") return createService(auth.user, body);
+    if (action === "saveReorderSettings") return saveReorderSettings(auth.user, body);
+  if (action === "createService") return createService(auth.user, body);
     if (action === "updateService") return updateService(auth.user, body);
     if (action === "deleteService") return deleteService(auth.user, body);
     if (action === "createSale") return createSale(auth.user, body);
