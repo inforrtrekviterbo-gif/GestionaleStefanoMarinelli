@@ -931,3 +931,10 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .disc-field input::-webkit-outer-spin-button,
 .disc-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .qty-stepper input, .disc-field input { -moz-appearance: textfield; appearance: textfield; }
+
+/* Cassa: spunta applica sconto sul totale */
+.discount-check { display: flex; align-items: center; gap: .5rem; margin: .2rem 0 .6rem; font-weight: 650; cursor: pointer; }
+.discount-check input { width: 18px; height: 18px; accent-color: var(--lime, #72d7ff); cursor: pointer; }
+.disc-field.cart-disc { display: flex; width: 100%; margin-bottom: .7rem; }
+.disc-field.cart-disc input { flex: 1; text-align: left; padding: 0 .6rem; height: 40px; }
+.disc-field.cart-disc .disc-toggle { height: 40px; }
