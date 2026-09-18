@@ -717,7 +717,7 @@ export default function CashRegister({ data, reload, queue, onQueueConsumed }: {
       const result = await post("createSale", { store, customerId: customer?.id ?? null, items: cart, total, fiscalDocumentType, ...payments() });
       let fiscalError = "";
       let fiscalMessage = result.fiscalJob?.status === "awaiting_setup" ? "Registratore RT da configurare: la richiesta resta salvata." : "";
-      if (result.realtimeSynced && result.localFiscalTicket && result.fiscalJob?.id) {
+      if (result.localFiscalTicket && result.fiscalJob?.id) {
         try {
           const bridgeResult = await localFiscalBridgeRequest({
             action: "printFiscalReceipt",
