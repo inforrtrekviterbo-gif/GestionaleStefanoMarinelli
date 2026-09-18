@@ -1108,7 +1108,7 @@ const adminMenuGroups: { label: string; items: readonly (readonly [string, strin
   { label: "", items: [["dashboard", "dashboard", "Riepilogo"]] },
   { label: "Vendite", items: [["cash", "point_of_sale", "Cassa"], ["register", "list_alt", "Registro casse"], ["reports", "summarize", "Corrispettivi"]] },
   { label: "Magazzino", items: [["warehouse", "inventory_2", "Magazzino"], ["reorder", "warning", "Da riordinare"], ["transfers", "swap_horiz", "Trasferimenti"]] },
-  { label: "Anagrafiche", items: [["customers", "group", "Clienti"], ["gifts", "card_giftcard", "Buoni regalo"], ["reservations", "event_note", "Prenotazioni"], ["repairs", "footprint", "Risuolature"], ["returns", "sync_alt", "Resi"], ["services", "handyman", "Servizi"]] },
+  { label: "Anagrafiche", items: [["customers", "group", "Clienti"], ["gifts", "card_giftcard", "Buoni regalo"], ["reservations", "event_note", "Prenotazioni"], ["repairs", "footprint", "Risuolature"], ["returns", "sync_alt", "Resi"]] },
   { label: "Amministrazione", items: [["documents", "receipt_long", "Fatturazione"], ["analytics", "trending_up", "Analisi vendite"], ["storico", "history", "Storico attività"], ["fiscal", "print", "Registratori RT"], ["settings", "settings", "Impostazioni"]] },
 ];
 const cashierMenuGroups: { label: string; items: readonly (readonly [string, string, string])[] }[] = [
