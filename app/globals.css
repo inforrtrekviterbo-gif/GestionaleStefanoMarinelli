@@ -26,6 +26,24 @@
   --success-bg: #102a36;
 }
 
+/* Tema chiaro: sidebar resta scura, contenuto chiaro. */
+[data-theme="light"] {
+  color-scheme: light;
+  --ink: #14202a;
+  --ink-soft: #5a7180;
+  --mint: #e7f2f8;
+  --green: #0f8fc6;
+  --green-dark: #0a6d99;
+  --lime: #0f8fc6;
+  --paper: #eef2f5;
+  --panel: #ffffff;
+  --line: #cdd9e1;
+  --danger: #d1453b;
+  --danger-bg: #fde7e6;
+  --success: #0f8fc6;
+  --success-bg: #e3f3fb;
+}
+
 * { box-sizing: border-box; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 html { background: var(--paper); }
@@ -964,3 +982,7 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .btn-spinner { display: inline-block; width: 16px; height: 16px; margin-right: .5rem; vertical-align: -3px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: btn-spin .7s linear infinite; }
 .checkout-button.is-loading { opacity: .9; cursor: progress; }
 @keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* Sidebar: pulsante cambio tema */
+.sidebar-theme { display: flex; align-items: center; gap: .6rem; width: 100%; margin-top: .5rem; padding: .55rem .7rem; border: 1px solid rgba(255,255,255,.14); border-radius: 12px; background: rgba(255,255,255,.04); color: white; font-weight: 650; font-size: .85rem; cursor: pointer; }
+.sidebar-theme:hover { background: rgba(255,255,255,.09); }
