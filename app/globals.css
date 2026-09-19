@@ -40,30 +40,30 @@
 /* Tema chiaro: sidebar resta scura, contenuto chiaro. */
 [data-theme="light"] {
   color-scheme: light;
-  --ink: #14231a;
-  --ink-soft: #5c7266;
-  --mint: #e7f4ec;
-  --green: #1c9c53;
-  --green-dark: #15803d;
-  --lime: #1c9c53;
-  --paper: #eef3ef;
+  --ink: #23180f;
+  --ink-soft: #7a6a5b;
+  --mint: #fdefe1;
+  --green: #e8710a;
+  --green-dark: #c25e00;
+  --lime: #e8710a;
+  --paper: #f4f1ee;
   --panel: #ffffff;
-  --line: #d3e2d8;
+  --line: #e6ddd3;
   --danger: #d1453b;
   --danger-bg: #fde7e6;
   --success: #1c9c53;
   --success-bg: #e4f5ea;
-  --surface-2: #eef4ef;
+  --surface-2: #f6efe8;
   --checkout-bg: #ffffff;
-  --checkout-ink: #14231a;
-  --overlay-bg: #f1f6f2;
-  --overlay-border: #d3e2d8;
-  --overlay-ink: #5c7266;
+  --checkout-ink: #23180f;
+  --overlay-bg: #f6efe8;
+  --overlay-border: #e6ddd3;
+  --overlay-ink: #7a6a5b;
   --sidebar-bg: #ffffff;
-  --sidebar-ink: #14231a;
-  --sidebar-ink-soft: #5c7266;
-  --sidebar-border: #e2ece5;
-  --sidebar-hover: rgba(28,156,83,.12);
+  --sidebar-ink: #23180f;
+  --sidebar-ink-soft: #7a6a5b;
+  --sidebar-border: #ece3d9;
+  --sidebar-hover: rgba(232,113,10,.12);
 }
 
 * { box-sizing: border-box; }
@@ -80,7 +80,7 @@ h1 { margin-bottom: 0; font-size: clamp(1.75rem, 3vw, 2.6rem); font-weight: 800;
 h2 { margin-bottom: .6rem; font-size: 1.15rem; font-weight: 800; letter-spacing: -.02em; }
 small { color: var(--ink-soft); }
 
-.eyebrow { margin-bottom: .45rem; color: #087eae; font-size: .69rem; font-weight: 850; letter-spacing: .15em; }
+.eyebrow { margin-bottom: .45rem; color: var(--green); font-size: .69rem; font-weight: 850; letter-spacing: .15em; }
 .muted { color: var(--ink-soft); line-height: 1.55; }
 .stack { display: grid; gap: 1rem; }
 .compact-stack { gap: .65rem; }
@@ -398,7 +398,7 @@ td small { margin-top: .16rem; font-size: .62rem; }
 .reorder-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: .9rem 0 .35rem; padding-top: .8rem; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: .72rem; }
 .reorder-toolbar button { display: inline-flex; align-items: center; gap: .35rem; }
 .reorder-table { min-width: 1100px; }
-.reorder-urgent { background: #211012; }
+.reorder-urgent { background: var(--danger-bg); }
 .checkbox-column { width: 36px; }
 .row-checkbox { width: 18px; height: 18px; accent-color: var(--cyan); cursor: pointer; }
 .reorder-quantity { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--cyan); color: #00131c; font-size: .9rem; }
@@ -440,7 +440,7 @@ td small { margin-top: .16rem; font-size: .62rem; }
 .trend-day > div > span i { display: block; min-width: 2px; height: 100%; border-radius: inherit; }
 .trend-day small { text-align: right; font-size: .58rem; }
 .firebase-account-list { display: grid; gap: .55rem; margin-top: 1rem; }
-.firebase-account-list span { display: grid; gap: .18rem; padding: .72rem .8rem; border: 1px solid #d2e3ea; border-radius: 12px; background: #10212a; }
+.firebase-account-list span { display: grid; gap: .18rem; padding: .72rem .8rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
 .firebase-account-list b { color: var(--green); font-size: .8rem; }
 .firebase-account-list small { font-size: .68rem; }
 .reports-head { align-items: center; }
@@ -1014,3 +1014,6 @@ img.thumb, img.cpc-thumb, img.scan-photo, img.product-detail-photo { object-fit:
 .theme-toggle { display: inline-flex; gap: .5rem; }
 .theme-toggle button { display: inline-flex; align-items: center; gap: .5rem; padding: .6rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); font-weight: 700; cursor: pointer; }
 .theme-toggle button.active { border-color: var(--green); background: var(--mint); color: var(--green); }
+
+/* Tema chiaro: il logo/wordmark (bianchi) restano su fondo scuro */
+[data-theme="light"] .sidebar-brand { background: #071019; border-radius: 14px; padding: .55rem .5rem; margin-bottom: .35rem; border-bottom-color: transparent; }
